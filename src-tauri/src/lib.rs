@@ -91,8 +91,30 @@ fn reset_keys(device: Dev, key_ids: Vec<u16>) -> Result<(), String> {
 /// must match, otherwise the slider and the backend disagree.
 const MAX_SNAP_TAP_DELAY_MS: u16 = 500;
 
+/// Whether Snap Tap may be written at all.
+///
+/// Storage is verified and clearing works, but the resolver's `mode` and `type`
+/// fields are not understood. Two written configurations were tried on real
+/// hardware: one made the keys emit a non-printable HID code so they appeared
+/// dead, the other was stored and had no effect at all.
+///
+/// Refusing the write is deliberate. A control that stores a plausible-looking
+/// configuration which silently does nothing — or which bricks two keys — is
+/// worse than no control, and the values that would be needed to make it work
+/// are guesses. Flip this once the semantics are known; see
+/// `docs/RESEARCH-NOTES.md`.
+const SNAP_TAP_WRITES_ENABLED: bool = false;
+
 #[tauri::command]
 fn set_snap_tap(device: Dev, pair: SnapTap) -> Result<(), String> {
+    if !SNAP_TAP_WRITES_ENABLED {
+        return Err(
+            "Snap Tap writes are disabled: the resolver's mode and type fields are not \
+             understood, and writing a guessed value can leave keys unusable. \
+             See docs/RESEARCH-NOTES.md."
+                .into(),
+        );
+    }
     if pair.key_a == pair.key_b {
         return Err("Snap Tap needs two different keys".into());
     }

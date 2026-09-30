@@ -1,6 +1,6 @@
 import { STRINGS, type Lang } from "../../i18n";
 import { api } from "../../ipc";
-import type { KeyboardState, SnapTap } from "../../types";
+import type { KeyboardState } from "../../types";
 import { Button, Panel, Row, Segmented, Slider, Toggle } from "../ui";
 
 interface Props {
@@ -23,6 +23,20 @@ const RESOLVER_MODES = [
   [3, "3"],
 ] as const;
 
+/**
+ * Whether enabling Snap Tap is offered at all.
+ *
+ * Storage is verified: the frame writes, reads back and the firmware keeps it.
+ * Behaviour is not. Two written configurations left the keys inert — one made
+ * them emit a non-printable HID code, the other was stored and ignored. The
+ * `mode` and `type` fields are not understood, so enabling stays off rather than
+ * shipping a control that writes a plausible-looking no-op.
+ *
+ * Flip to `true` once the resolver semantics are known. See
+ * `docs/RESEARCH-NOTES.md`.
+ */
+export const CAN_ENABLE_SNAP_TAP = false;
+
 /** The resolver thresholds and the delay are 16-bit fields on the wire. */
 const MAX_RAW = 0xffff;
 const MAX_DELAY_MS = 500;
@@ -37,25 +51,12 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
     return def ? `${def.label} (${def.id})` : String(id);
   };
 
-  // Nothing configured yet: offer to create a pair from the current selection.
+  // Nothing configured yet.
   if (!configured) {
     const pairFromSelection = selection.length === 2 ? selection : null;
     const keyA = pairFromSelection?.[0] ?? selection[0] ?? 4;
     const keyB = pairFromSelection?.[1] ?? selection[1] ?? 7;
     const valid = keyA !== keyB;
-
-    const enable = (mode: number) =>
-      run(t.saved, () =>
-        api.setSnapTap({
-          key_a: keyA,
-          key_b: keyB,
-          value_a: 2,
-          value_b: 2,
-          mode,
-          key_type: 0,
-          delay_ms: 10,
-        }),
-      );
 
     return (
       <div class="columns">
@@ -64,32 +65,24 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
             label={t.snapTapOff}
             hint={valid ? `${label(keyA)} / ${label(keyB)}` : t.snapTapNeedsTwoKeys}
             checked={false}
-            disabled={offline || !valid}
-            onChange={() => void enable(1)}
+            disabled
+            onChange={() => {}}
           />
-          <Row label={t.snapTapFirstKey}>{label(keyA)}</Row>
-          <Row label={t.snapTapSecondKey}>{label(keyB)}</Row>
-          <p class="note">{t.snapTapModeWarning}</p>
+          <p class="note">{t.snapTapUnavailable}</p>
         </Panel>
 
-        <Panel title={t.snapTapResolverMode}>
-          <Row label={t.snapTapResolverMode}>
-            <Segmented options={RESOLVER_MODES} value={1} onChange={() => {}} disabled />
-          </Row>
-          <p class="note">
-            {valid ? t.snapTapNote : t.snapTapNeedsTwoKeys}
-          </p>
+        <Panel title={t.snapTapStatus}>
+          <p class="note">{t.snapTapUnavailableDetail}</p>
         </Panel>
       </div>
     );
   }
 
-  // Configured. Every control writes through immediately, the same way the Rapid
-  // Trigger tab does, so there is no separate "save" button that could apply a
-  // different key pair than the one shown.
-  const update = (patch: Partial<SnapTap>) =>
-    run(t.saved, () => api.setSnapTap({ ...configured, ...patch }));
-
+  // Configured. Reading and clearing work and are kept, because clearing is the
+  // recovery path for anyone who wrote a pair with an older build.
+  //
+  // The per-field editors stay disabled: `mode` and `type` are not understood,
+  // and a written value is very likely what stopped the keys working.
   return (
     <div class="columns">
       <Panel title={t.snapTapTitle} description={t.snapTapActive}>
@@ -102,19 +95,19 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
         />
         <Row label={t.snapTapFirstKey}>{label(configured.key_a)}</Row>
         <Row label={t.snapTapSecondKey}>{label(configured.key_b)}</Row>
-        <p class="note">{t.snapTapModeWarning}</p>
+        <p class="note">{t.snapTapUnavailableDetail}</p>
         <Button variant="danger" disabled={offline} onClick={() => void run(t.saved, () => api.clearSnapTap())}>
           {t.snapTapDisable}
         </Button>
       </Panel>
 
-      <Panel title={t.snapTapResolverMode}>
+      <Panel title={t.snapTapStatus}>
         <Row label={t.snapTapResolverMode}>
           <Segmented
             options={RESOLVER_MODES}
             value={configured.mode}
-            disabled={offline}
-            onChange={(next) => void update({ mode: Number(next) })}
+            disabled
+            onChange={() => {}}
           />
         </Row>
         <Slider
@@ -124,8 +117,8 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
           max={MAX_RAW}
           step={1}
           accent="amber"
-          disabled={offline}
-          onCommit={(next) => void update({ value_a: next })}
+          disabled
+          onCommit={() => {}}
         />
         <Slider
           label={`${t.snapTapThreshold} B`}
@@ -134,8 +127,8 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
           max={MAX_RAW}
           step={1}
           accent="amber"
-          disabled={offline}
-          onCommit={(next) => void update({ value_b: next })}
+          disabled
+          onCommit={() => {}}
         />
         <Slider
           label={`${t.snapTapDelay}, ms`}
@@ -144,10 +137,9 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
           max={MAX_DELAY_MS}
           step={1}
           accent="amber"
-          disabled={offline}
-          onCommit={(next) => void update({ delay_ms: next })}
+          disabled
+          onCommit={() => {}}
         />
-        <p class="note">{t.snapTapNote}</p>
       </Panel>
     </div>
   );

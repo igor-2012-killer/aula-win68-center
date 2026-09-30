@@ -64,23 +64,19 @@ Correctly **absent from the UI**:
   frame but persists nothing, and a write **corrupts the mode of five keys**.
   See [`docs/VENDOR-DRIVER.md` §6](docs/VENDOR-DRIVER.md).
 
-**Snap Tap (44) works and is in the UI.** It was previously listed as
-unimplemented, which was wrong: the old probe used the wrong frame (8-bit values,
-6-byte payload) and, more importantly, read with `key_a = 0`, which always
-returns zeros by design. The correct 11-byte dynamic-delay frame round-trips,
-confirmed by `hardware_snap_tap_round_trips` and
-`hardware_snap_tap_is_discoverable_and_clearable`. Pick two keys in the diagram
-and the tab writes the pair, reads it back, and restores both keys' modes when
-you disable it.
+**Snap Tap (44): the pair stores, but it does not switch yet.** The frame was
+wrong for a long time — the old probe sent 8-bit values in a 6-byte payload and
+read with `key_a = 0`, which the firmware answers empty by design. With the
+correct 11-byte dynamic-delay frame the pair writes, reads back and persists, and
+clearing works. What is missing is behaviour: pressing the key does not switch
+outputs, because the resolver's `mode` and `type` fields are not understood.
 
-Two caveats the UI states rather than hides:
-
-* The firmware switches both keys of the pair to Single Mode on its own, and
-  does not revert that when the pair is cleared, so the app saves and restores
-  the modes itself.
-* The two resolver thresholds are shown as raw values. The vendor calls them
-  `DKSV[0]` / `DKSV[1]`; their unit has not been measured, so presenting them as
-  milliseconds would be a guess.
+The tab is therefore **read and clear only**. Writing is refused in
+`src-tauri/src/lib.rs`, because two guessed configurations were tried on real
+hardware and one of them left two keys emitting a non-printable HID code. A
+control that can quietly disable your keys is worse than no control.
+[`docs/RESEARCH-NOTES.md`](docs/RESEARCH-NOTES.md) has the full account, and
+`docs/VENDOR-DRIVER.md` §6 the frame layout.
 
 Also believed to be **implementable**, pending measurement:
 

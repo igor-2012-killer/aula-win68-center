@@ -261,6 +261,67 @@ also what Esc legitimately reports for its rapid-trigger registers.
 
 ---
 
+## Snap Tap: storage works, behaviour does not (yet)
+
+The pair **writes, reads back and persists**. It does not switch anything, and
+the reason is not known. Recording this in full because two wrong guesses cost
+the user a pair of dead keys.
+
+### What is verified
+
+* The 11-byte dynamic-delay frame (`cmd 44`) round-trips on real hardware.
+* The firmware stores the pair: a read addressed at the first key returns it.
+* Writing a pair switches both keys to Single Mode (layout 8 = `0x08`), and
+  clearing puts their modes back.
+* Clearing works from both `aula-probe` and the app, so a bad pair is always
+  recoverable.
+
+### What is not
+
+Pressing the key does not switch between the two outputs. Two configurations were
+tried on real hardware:
+
+| `DKS` | `DKSV` | `mode` | `type` | `delay` | Result |
+|---|---|---|---|---|---|
+| `[4, 7]` | `[2, 2]` | 1 | 0 | 150 ms | **keys went silent** |
+| `[4, 7]` | `[4, 7]` | 1 | 0 | 150 ms | stored, no effect; keys typed normally |
+
+In the first case the keys stopped emitting anything. `DKSV` is rendered by the
+vendor UI through `Keyboard_Text[DKSV[w]]` — a table of *key names* — so
+`DKSV` holds HID ids, not thresholds. I had presented them in the app as numeric
+"threshold" sliders and defaulted them to `2`, which is not a printable key, so
+the keys dutifully emitted a code that types nothing.
+
+Correcting that to `DKSV = [4, 7]` produced no behaviour change, which means the
+remaining unknowns are `mode` and `type`. `mode` indexes a list the bundle
+defines elsewhere; the only `mode1..mode4` strings found near these structures
+belong to **macros**, so the Snap Tap mode list was not located.
+
+### Why the app refuses to write
+
+`SNAP_TAP_WRITES_ENABLED` in `src-tauri/src/lib.rs` is `false`, and
+`CAN_ENABLE_SNAP_TAP` in `SnapTapTab.tsx` mirrors it. Reading and clearing stay
+available, because clearing is the recovery path for anyone who wrote a pair
+with an intermediate build.
+
+A control that stores a plausible-looking configuration which silently does
+nothing, or which bricks two keys, is worse than no control. The values needed
+to make it work are guesses, and the cost of a wrong guess is the user's
+keyboard.
+
+### How to settle it
+
+Run the **vendor's own driver** against the keyboard and read the packets it
+sends. `https://magnet.aulastar.com` is a WebHID page; connect the board, set up
+Snap Tap in its UI, and capture what goes over the wire. That answers `mode`,
+`type` and the `DKSV` role in one pass, without guessing. A browser with a
+WebHID-capable Chromium and a user gesture for the permission prompt is enough;
+the driver's JavaScript is already in `docs/VENDOR-DRIVER.md`'s provenance notes.
+
+Alternative: a firmware dump would show the handler for `cmd 44` outright.
+
+---
+
 ## Open: Snap Tap's mode side effect is not visible in-process
 
 Writing a Snap Tap pair makes the firmware switch both keys to Single Mode

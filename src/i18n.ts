@@ -28,6 +28,9 @@ interface Strings {
   snapTapNote: string;
   snapTapModeWarning: string;
   snapTapNeedsTwoKeys: string;
+  snapTapStatus: string;
+  snapTapUnavailable: string;
+  snapTapUnavailableDetail: string;
 
   selection: string;
   selectNone: string;
@@ -149,6 +152,10 @@ const ru: Strings = {
   snapTapModeWarning:
     "Клавиатура сама переводит обе клавиши в режим «своя точка». При выключении режимы возвращаются как были.",
   snapTapNeedsTwoKeys: "Выберите две разные клавиши в схеме выше",
+  snapTapStatus: "Состояние",
+  snapTapUnavailable: "Включение пока недоступно",
+  snapTapUnavailableDetail:
+    "Прошивка принимает и хранит пару, но включить переключение не удалось: поля mode и type не расшифрованы. Две записанные конфигурации либо оставляли клавиши без вывода, либо игнорировались. Поэтому запись отключена — значение наугад может сделать клавиши нерабочими. Чтение и сброс работают: если пара уже записана, её можно отключить здесь.",
 
   selection: "Выбор клавиш",
   selectNone: "Снять всё",
@@ -274,6 +281,10 @@ const en: Strings = {
   snapTapModeWarning:
     "The keyboard switches both keys to Single Mode on its own. Disabling restores the modes they had before.",
   snapTapNeedsTwoKeys: "Pick two different keys in the diagram above",
+  snapTapStatus: "Status",
+  snapTapUnavailable: "Enabling is not available yet",
+  snapTapUnavailableDetail:
+    "The firmware accepts and stores the pair, but switching could not be turned on: the mode and type fields are not understood. Two written configurations either left the keys emitting nothing or were ignored outright. Writing is therefore disabled, because a guessed value can make keys unusable. Reading and clearing work: if a pair is already stored, you can switch it off here.",
 
   selection: "Key selection",
   selectNone: "Clear",
