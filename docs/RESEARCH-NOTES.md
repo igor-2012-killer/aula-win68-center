@@ -261,7 +261,93 @@ also what Esc legitimately reports for its rapid-trigger registers.
 
 ---
 
-## Snap Tap: storage works, behaviour does not (yet)
+## Advanced keys: storage works, behaviour does not
+
+Snap Tap and Mod-Tap are both stored correctly and neither can be made to
+behave. They fail the same way and probably for the same reason, so they are
+written up together.
+
+Both live in the firmware's "advanced key" subsystem. The vendor driver keys them
+by type, and a key's `layout 8` low nibble selects which one applies — the
+firmware sets that nibble itself when you write the record:
+
+| type | feature | command | builder |
+|---|---|---|---|
+| 1 | Dynamic Key Switch | 39 | `DKSPack` |
+| 2 | MPT | ? | `MPTPack` |
+| 3 | **Mod-Tap** | 36 | `MTPack` |
+| 4 | Toggle | 37 | `TGLPack` |
+| 8 | **Snap Tap** | 44 | `SOCDV4Pack` |
+
+Reading one of these records back always works, and the bytes are exactly what
+was written. The firmware also flips the key's mode nibble to match the type.
+
+### What is verified on hardware
+
+* `MTPack` (Mod-Tap, `cmd 36`) builds as the driver does: payload 7 bytes,
+  `rw`, `key`, two 16-bit values, one delay byte. `advancedKeyV2` is satisfied on
+  protocol `1.0.9`, so the 16-bit branch is the right one.
+* Writes persist and read back identically, verified independently of the write.
+* The firmware sets the key's `layout 8` low nibble to `3` for Mod-Tap.
+* The delay byte is a **real threshold**: at byte 20 the tap branch produced
+  nothing and a short press did not register; at byte 2 it produced a tap. So the
+  driver's `Delay / 10` scaling is directionally right.
+
+### What is not
+
+Mod-Tap never emits its second value.
+
+| `DKS[0]` | `DKS[1]` | delay | observed |
+|---|---|---|---|
+| `0xE0` Ctrl | `0xE4` Alt | 200 ms | key silent |
+| `0x17` T | `0xE0` Ctrl | 200 ms | tap `t`, hold invisible |
+| `0x17` T | `0x28` Enter | 20 ms | tap `t`, no newlines on hold |
+| `0x1D` Z | `0x28` Enter | 20 ms | **tap `Z`, hold `Z`**, even pressed to the bottom |
+
+The last row is the decisive one. `DKS[0]` is definitely the tap output — that
+was the point of setting it to `Z` and seeing `Z` come out. `DKS[1]` is never
+emitted, and neither holding for two seconds nor pushing the key to its travel
+limit brings it out.
+
+So the tap half of Mod-Tap works and the hold half cannot be reached. Snap Tap
+fails the same way: the pair stores, and nothing switches.
+
+### Why this is worth stopping on
+
+Two features, two different commands, two different packet layouts, one identical
+outcome. That points at the advanced-key subsystem as a whole rather than at two
+independent mistakes in my frames — the frames are transcribed directly from the
+driver and round-trip byte-for-byte.
+
+The remaining unknowns are all *semantic*, and none of them are recoverable by
+reading the driver more carefully:
+
+* For Snap Tap, what `mode` and `type` mean.
+* For Mod-Tap, what makes the hold branch fire, and whether `DKS[1]` is an output
+  at all rather than, say, a second key that has to be pressed alongside.
+
+### How to settle it
+
+One approach serves both, and it is the same one already recommended for Snap
+Tap: **run the vendor's own WebHID driver against the board and record the
+packets.** Configure Mod-Tap and Snap Tap in the vendor's UI with a keyboard
+logger or a proxy in front of the HID endpoint, and the exact bytes plus the
+observed behaviour appear side by side.
+
+Everything in this file's "verified" column was derived from that driver without
+needing this step; everything in the "not" column needs it. Guessing further has
+already cost two dead-key incidents and produced nothing.
+
+The protocol code stays in the tree either way: `protocol::mod_tap_packet`,
+`parse_mod_tap`, `ModTap`, and `aula-probe modtap` are correct and are exactly
+what the capture step needs. No UI is exposed, for the same reason as Snap Tap.
+
+---
+
+## Snap Tap in detail
+
+The frame layout and the failure history. See the section above for how Snap Tap
+relates to Mod-Tap and why both stopped here.
 
 The pair **writes, reads back and persists**. It does not switch anything, and
 the reason is not known. Recording this in full because two wrong guesses cost

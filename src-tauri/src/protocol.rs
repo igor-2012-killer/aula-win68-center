@@ -64,6 +64,8 @@ pub mod cmd {
     pub const KEY_LAYOUT: u8 = 35;
     pub const DEADZONE: u8 = 41;
     pub const DEFAULT_KEYS: u8 = 43;
+    /// Mod-Tap. Built by the vendor driver as `MTPack`; see `mod_tap_packet`.
+    pub const MOD_TAP: u8 = 36;
     /// Snap Tap. Built by the vendor driver as `SOCDPack`; see `pair_packet`.
     pub const SOCD: u8 = 44;
     /// Rapid Switch. Built by the vendor driver as `RSPack`, byte-identical to
@@ -301,6 +303,73 @@ pub fn parse_pair(reply: &[u8]) -> Option<KeyPair> {
         mode: reply[11],
         key_type: reply[12],
         delay: u16::from_le_bytes([reply[13], reply[14]]),
+    })
+}
+
+/// One Mod-Tap assignment: a key that emits `key` when tapped and the two
+/// modifier keys when held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ModTap {
+    /// The key the Mod-Tap is assigned to. Also the read address.
+    pub key: u8,
+    /// Modifier emitted on hold, first half.
+    pub modifier_a: u16,
+    /// Modifier emitted on hold, second half.
+    pub modifier_b: u16,
+    /// Hold threshold in **10 ms units**, which is how the vendor driver sends
+    /// it. [`ModTap::delay_ms`] converts for the UI.
+    pub delay_tenths: u8,
+}
+
+impl ModTap {
+    /// The driver's own default: 200 ms.
+    pub const DEFAULT_DELAY_MS: u16 = 200;
+
+    /// Hold threshold in milliseconds.
+    pub fn delay_ms(&self) -> u16 {
+        self.delay_tenths as u16 * 10
+    }
+
+    pub fn from_delay_ms(ms: u16) -> Self {
+        Self {
+            delay_tenths: (ms / 10).min(u8::MAX as u16) as u8,
+            ..Self::default()
+        }
+    }
+}
+
+/// Mod-Tap packet, command 36.
+///
+/// Reproduces the vendor driver's `MTPack` on the `advancedKeyV2` branch, which
+/// is the one that applies to protocol `1.0.9` (the gate needs `>= 1.0.3`). The
+/// older branch sends 8-bit values and is deliberately not implemented.
+///
+/// ```text
+/// 5c 07 24 <ck> <rw> <key> <modA_lo> <modA_hi> <modB_lo> <modB_hi> <delay>
+/// ```
+///
+/// `delay` is in 10 ms units. The driver's UI holds a millisecond value and
+/// divides by 10 on the way out.
+pub fn mod_tap_packet(write: bool, tap: ModTap) -> [u8; PACKET_LEN] {
+    let mut b = Builder::new(cmd::MOD_TAP);
+    b.put(u8::from(write));
+    b.put(tap.key);
+    b.put_u16(tap.modifier_a);
+    b.put_u16(tap.modifier_b);
+    b.put(tap.delay_tenths);
+    b.finish()
+}
+
+/// Decodes a Mod-Tap reply, which mirrors the request from offset 5.
+pub fn parse_mod_tap(reply: &[u8]) -> Option<ModTap> {
+    if reply.len() < 12 {
+        return None;
+    }
+    Some(ModTap {
+        key: reply[5],
+        modifier_a: u16::from_le_bytes([reply[6], reply[7]]),
+        modifier_b: u16::from_le_bytes([reply[8], reply[9]]),
+        delay_tenths: reply[10],
     })
 }
 
@@ -732,6 +801,58 @@ mod tests {
             let read = pair_packet(false, cmd_id, KeyPair::CLEARED);
             assert_eq!(read[4], 0, "byte 4 is the read/write flag");
         }
+    }
+
+    #[test]
+    fn builds_mod_tap_frames_like_the_vendor_driver() {
+        // MTPack(1, [key], [modA], [modB], [Delay/10]) on the advancedKeyV2
+        // branch, which is the one that applies to protocol 1.0.9.
+        let tap = ModTap {
+            key: 0x04,        // A
+            modifier_a: 0xE0, // left Ctrl
+            modifier_b: 0xE4, // left Alt
+            delay_tenths: 20, // 200 ms, the driver's default
+        };
+        let p = mod_tap_packet(true, tap);
+        assert_eq!(p[0], HEADER);
+        assert_eq!(p[1], 7, "rw + key + two 16-bit values + delay");
+        assert_eq!(p[2], cmd::MOD_TAP);
+        assert_eq!(
+            &p[4..11],
+            &[1, 0x04, 0xE0, 0x00, 0xE4, 0x00, 20],
+            "rw, key, both 16-bit modifiers little-endian, delay"
+        );
+        assert_eq!(p[3], checksum(&p), "checksum must validate");
+        assert!(p[11..].iter().all(|&b| b == 0), "padding stays zero");
+
+        assert_eq!(mod_tap_packet(false, tap)[4], 0, "byte 4 is read/write");
+    }
+
+    #[test]
+    fn mod_tap_delay_converts_to_the_drivers_tenths() {
+        assert_eq!(ModTap::from_delay_ms(200).delay_tenths, 20);
+        assert_eq!(ModTap::from_delay_ms(200).delay_ms(), 200);
+        // The driver divides by 10, so anything under 10 ms cannot be expressed.
+        assert_eq!(ModTap::from_delay_ms(5).delay_tenths, 0);
+        assert_eq!(ModTap::from_delay_ms(5).delay_ms(), 0);
+    }
+
+    #[test]
+    fn mod_tap_round_trips_through_the_reply_layout() {
+        let tap = ModTap {
+            key: 0x04,
+            modifier_a: 0x1234,
+            modifier_b: 0x5678,
+            delay_tenths: 25,
+        };
+        let p = mod_tap_packet(true, tap);
+        let mut reply = [0u8; PACKET_LEN];
+        reply[0] = HEADER;
+        reply[1] = 7;
+        reply[2] = cmd::MOD_TAP.wrapping_add(RESP_OK_FLAG);
+        reply[5..11].copy_from_slice(&p[5..11]);
+        assert_eq!(parse_mod_tap(&reply), Some(tap));
+        assert_eq!(parse_mod_tap(&[0u8; 11]), None, "needs offsets up to 10");
     }
 
     #[test]

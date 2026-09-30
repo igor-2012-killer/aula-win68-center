@@ -89,6 +89,7 @@ fn main() -> ExitCode {
         "pair" => cmd_pair(&mut link, &positional[1..], confirmed),
         "layout" => cmd_layout(&mut link, &positional[1..]),
         "grid" => cmd_grid(&mut link),
+        "modtap" => cmd_modtap(&mut link, &positional[1..], confirmed),
         other => {
             eprintln!("{RED}unknown command{RESET} {other:?} — try --help");
             ExitCode::FAILURE
@@ -117,6 +118,8 @@ fn print_help() {
                                           read (or write) a Snap Tap / Rapid Switch pair
   {BOLD}layout <id> [ids]{RESET}                  read one per-key register across the keymap
   {BOLD}grid{RESET}                              live sensor grid, raw rows/cols, no labels
+  {BOLD}modtap <key> [modA modB delayMs] --yes{RESET}
+                                          read (or write) a Mod-Tap assignment
   {BOLD}set <what> <args...> --yes{RESET}      guarded writes
 
 {BOLD}WRITES{RESET}
@@ -658,6 +661,62 @@ fn cmd_grid(link: &mut Link) -> ExitCode {
         for h in &hot {
             println!("    {h}");
         }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Mod-Tap (command 36), using the vendor driver's `MTPack` frame.
+///
+/// Read-only unless `--yes` is given. `aula-probe modtap <key> [modA modB delayMs]`.
+fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
+    let Some(key) = args.first().and_then(|v| v.parse::<u8>().ok()) else {
+        eprintln!("usage: aula-probe modtap <key> [modA_hid modB_hid delay_ms] [--yes]");
+        return ExitCode::FAILURE;
+    };
+    let num = |i: usize| -> u16 { args.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
+    let tap = p::ModTap {
+        key,
+        modifier_a: num(1),
+        modifier_b: num(2),
+        delay_tenths: (num(3) / 10).min(u8::MAX as u16) as u8,
+    };
+    let writing = confirmed && args.len() > 1;
+    if writing {
+        println!(
+            "{YELLOW}writing Mod-Tap: key=0x{key:02x} modA=0x{:04x} modB=0x{:04x} delay={}ms{RESET}",
+            tap.modifier_a,
+            tap.modifier_b,
+            tap.delay_ms()
+        );
+    }
+
+    let packet = p::mod_tap_packet(writing, tap);
+    dump_packet("tx", &packet);
+    let Some(reply) = link.query(packet) else {
+        println!("{DIM}no reply{RESET}");
+        return ExitCode::SUCCESS;
+    };
+    dump_packet("rx", &reply.0);
+
+    if reply.is_fail() {
+        println!("{RED}refused (0xFF){RESET}");
+        return ExitCode::SUCCESS;
+    }
+    if !reply.matches(p::cmd::MOD_TAP) {
+        println!("{YELLOW}unexpected reply id 0x{:02x}{RESET}", reply.0[2]);
+        return ExitCode::SUCCESS;
+    }
+    match p::parse_mod_tap(&reply.0) {
+        Some(got) => {
+            println!("  key       0x{:02x}", got.key);
+            println!("  modifierA 0x{:04x}", got.modifier_a);
+            println!("  modifierB 0x{:04x}", got.modifier_b);
+            println!("  delay     {} ms", got.delay_ms());
+            if !writing && got.key == 0 && got.modifier_a == 0 {
+                println!("  {DIM}(nothing configured for this key){RESET}");
+            }
+        }
+        None => println!("{YELLOW}reply too short to parse{RESET}"),
     }
     ExitCode::SUCCESS
 }
