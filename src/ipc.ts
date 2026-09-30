@@ -1,6 +1,6 @@
 ﻿import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { KeyboardState, Lighting } from "./types";
+import type { KeyboardState, Lighting, SnapTap } from "./types";
 
 export const EVT_STATE = "kb://state";
 export const EVT_TRAVEL = "kb://travel";
@@ -31,6 +31,9 @@ export const api = {
   setKeysDeadzone: (keyIds: number[], pressMm: number, releaseMm: number) =>
     call<void>("set_keys_deadzone", { keyIds, pressMm, releaseMm }),
   resetKeys: (keyIds: number[]) => call<void>("reset_keys", { keyIds }),
+
+  setSnapTap: (pair: SnapTap) => call<void>("set_snap_tap", { pair }),
+  clearSnapTap: () => call<void>("clear_snap_tap"),
 
   setLighting: (config: Lighting) => call<void>("set_lighting", { config }),
 

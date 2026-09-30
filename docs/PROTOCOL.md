@@ -1,7 +1,14 @@
 # Wire protocol
 
 Everything here was determined empirically against real hardware — an **Aula
-WIN68 HE Pro**, USB IDs `0x1CA2:0x1901`, firmware **9.1**, protocol version **1**.
+WIN68 HE Pro**, USB IDs `0x1CA2:0x1901`, **protocol version `1.0.9`**.
+
+> Much of this file was later cross-checked against the **vendor's own public
+> driver JavaScript**, which is the authoritative spec. See
+> [`VENDOR-DRIVER.md`](VENDOR-DRIVER.md) for the enum definitions, the feature
+> gating table, and the real Snap Tap / Rapid Switch frame layouts. Where the
+> two disagree, the vendor driver wins and this file is the thing that is
+> wrong.
 
 > If you change an offset, re-derive it from a capture. `aula-probe raw <hex>`
 > prints packets, and `src-tauri/src/protocol.rs` has unit tests built from real
@@ -122,7 +129,7 @@ These three values drive the slider bounds in the UI. Do not hard-code them.
 
 Sent with `cmd` in byte 2 and the payload starting at byte 4.
 
-| id | Name | State on fw 9.1 |
+| id | Name | State on protocol 1.0.9 |
 |---|---|---|
 | 8, 9, 10, 14 | bootloader sign / erase / reboot / crc | **never send these** |
 | 18 | `REALTIME_TRAVEL` | works |
@@ -137,8 +144,8 @@ Sent with `cmd` in byte 2 and the payload starting at byte 4.
 | 41 | `DEADZONE` | actuation works, deadzone fields read-only |
 | 42 | `KRGB` | per-key RGB, unimplemented |
 | 43 | `DEFAULT_KEYS` | read-only |
-| 44 | `SOCD` | **read-only, always zero** — see RESEARCH-NOTES |
-| 45 | `RAPID_SWITCH` | `0xFF`, not implemented |
+| 44 | `SOCD` | **works** — Snap Tap, writable and persistent; dynamic-delay frame, see VENDOR-DRIVER.md §6 |
+| 45 | `RAPID_SWITCH` | **never send** — unsupported, and a write corrupts 5 key modes |
 
 ### 5.1 `KEY_LAYOUT` (35) — per-key settings
 
@@ -149,13 +156,38 @@ Payload: `mode`, then up to 14 triples of `(key_id, layout, value_lo, value_hi)`
 |---|---|---|
 | 0 | `FN0` — base layer key code | HID code |
 | 1 | `FN1` — Fn layer key code | HID code |
-| 4 | actuation point | µm |
-| 5 | release travel | µm |
-| 6 | press deadzone | µm |
-| 7 | release deadzone | µm |
+| 4 | actuation point (`Layout_DB0`) | µm |
+| 5, 6, 7 | advanced-key deadzone stages (`Layout_DB1..3`) | µm |
 | 8 | mode — **high nibble is the touch mode**, low nibble is the advanced key mode | bitmap |
-| 20 | RT press sensitivity | µm |
-| 21 | RT release sensitivity | µm |
+| 9-12 | dynamic key switch stages (`Layout_DKS1..4`) | – |
+| 13-16 | trigger-release step (`Layout_TRPS1..4`) | µm |
+| 19 | mod-tap delay, `value * 10` ms (`Layout_MTDelay`) | ms |
+| 20 | RT press sensitivity (`Layout_RTP`) | µm |
+| 21 | RT release sensitivity (`Layout_RTR`) | µm |
+| **22** | **dead press** (`Layout_DP`) | µm |
+| **23** | **dead release** (`Layout_DR`) | µm |
+| 24 | single-touch release (`Layout_KR`) | µm |
+| 25 | axis id (`Layout_AXIS`) | – |
+
+> **Correction.** Earlier revisions of this table listed 5/6/7 as release travel
+> and the press/release deadzone pair. The vendor driver names 5/6/7
+> `Layout_DB1..3`, i.e. advanced-key deadzone stages, and puts the classic
+> dead press / dead release on **22 and 23**. Both pairs are writable on this
+> firmware, but 5/6/7 ship at 1000/2000/3000 µm — above the actuation point — so
+> writing "deadzones" there makes keys unusable. Confirmed by round-trip in
+> `hardware_writes_and_restores_per_key_deadzones`.
+> See [`VENDOR-DRIVER.md`](VENDOR-DRIVER.md) §5.
+
+### The `0xFFFF` "no data" marker
+
+**Any per-key register can come back as `0xFFFF`, and it means "this key has no
+value for this register", not a distance.** Read as millimetres it is 65.54 mm,
+which is how Esc's rapid-trigger settings used to show up in the UI as a
+nonsensical value.
+
+Treat it as absent, not as a number. `device::distance()` is the single place
+that does this, and `aula-probe` reports such keys as `no data` rather than as
+outliers.
 
 Touch modes in the high nibble of layout 8:
 
@@ -193,7 +225,43 @@ tx  5c 0f 29 49 | 01 00 00 d0 07 00 00 00 00 00 00 00 00 00 00 00
 ```
 
 Only the actuation field persists. The two deadzone fields always read back as
-zero — use per-key layouts 6 and 7 instead.
+zero — use per-key layouts **22 and 23** (`Layout_DP` / `Layout_DR`) instead.
+
+### 5.2.1 `SOCD` (44) — Snap Tap
+
+Works. Payload length **11**:
+
+```text
+byte  4         0 = read, 1 = write
+byte  5         key A  (this is also the read address)
+byte  6         key B
+bytes 7..8      value A, 16-bit LE
+bytes 9..10     value B, 16-bit LE
+byte  11        mode (0 = disabled)
+byte  12        type
+bytes 13..14    delay, 16-bit LE ms
+```
+
+```text
+tx  5c 0b 2c c8 01 04 07 02 00 03 00 01 00 0a 00
+                 ^^  rw=1  A  B  vA=2  vB=3 mode=1 type=0 delay=10
+rx  5c 0b ac 48 00 04 07 02 00 03 00 01 00 0a 00
+```
+
+Reads are keyed by byte 5. A read with byte 5 = 0 always returns zeros, which
+looks exactly like "unconfigured". The reply is 11 payload bytes and mirrors the
+request from offset 5 onward.
+
+Two side effects to handle:
+
+* Writing a pair **silently sets the mode field of both keys to `0x08`**
+  (Single Mode). Clearing the pair does not revert it.
+* Clearing means writing the *same* key B with zeroed values and `mode = 0`. The
+  pair identity stays recorded, so treat zero values as "off".
+
+See [VENDOR-DRIVER.md](VENDOR-DRIVER.md) §6 for the vendor source of this
+layout. Rust: `protocol::pair_packet`, `protocol::KeyPair`,
+`protocol::parse_pair`.
 
 ### 5.3 `RGB` (24)
 
@@ -254,9 +322,10 @@ replying `0x18` instead of `0x98`, the RGB state cannot be read back — but any
 RGB *write* clears it. Treat an unexpected reply as "keep the last known value"
 rather than "the setting is zero".
 
-**Per-key deadzone defaults are implausibly large.** Layouts 6 and 7 ship at
-2000 µm and 3000 µm. Useful deadzones live below 500 µm, so the app clamps
-readings to that range rather than showing a slider pinned at its maximum.
+**Layouts 5/6/7 ship at implausibly large values (1000/2000/3000 µm).** They are
+`Layout_DB1..3`, advanced-key deadzone *stages*. The real deadzones are layouts
+**22/23** (`Layout_DP` / `Layout_DR`), which ship at a sensible 200 µm and are
+what the app now writes.
 
 **`QUERY_SYS_WIN` returning 0 means macOS**, not "disconnected". There is no
 single boolean; check both 33 and 34.

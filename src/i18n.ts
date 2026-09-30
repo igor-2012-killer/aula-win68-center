@@ -9,9 +9,25 @@ interface Strings {
 
   navActuation: string;
   navRapid: string;
+  navSnapTap: string;
   navLighting: string;
   navSensors: string;
   navSystem: string;
+
+  snapTapTitle: string;
+  snapTapHint: string;
+  snapTapOff: string;
+  snapTapOffHint: string;
+  snapTapActive: string;
+  snapTapFirstKey: string;
+  snapTapSecondKey: string;
+  snapTapResolverMode: string;
+  snapTapThreshold: string;
+  snapTapDelay: string;
+  snapTapDisable: string;
+  snapTapNote: string;
+  snapTapModeWarning: string;
+  snapTapNeedsTwoKeys: string;
 
   selection: string;
   selectNone: string;
@@ -112,9 +128,27 @@ const ru: Strings = {
 
   navActuation: "Срабатывание",
   navRapid: "Rapid Trigger",
+  navSnapTap: "Snap Tap",
   navLighting: "Подсветка",
   navSensors: "Датчики",
   navSystem: "Система",
+
+  snapTapTitle: "Snap Tap",
+  snapTapHint: "Одно нажатие — первая клавиша, два быстрых — вторая",
+  snapTapOff: "Snap Tap выключен",
+  snapTapOffHint: "Включите, чтобы настроить пару клавиш",
+  snapTapActive: "Snap Tap настроен",
+  snapTapFirstKey: "Первая клавиша",
+  snapTapSecondKey: "Вторая клавиша",
+  snapTapResolverMode: "Режим резолвера",
+  snapTapThreshold: "Порог",
+  snapTapDelay: "Задержка",
+  snapTapDisable: "Выключить Snap Tap",
+  snapTapNote:
+    "Порог передан производителем как DKSV[0]/DKSV[1]; единица измерения не измерена, поэтому значение показано как есть.",
+  snapTapModeWarning:
+    "Клавиатура сама переводит обе клавиши в режим «своя точка». При выключении режимы возвращаются как были.",
+  snapTapNeedsTwoKeys: "Выберите две разные клавиши в схеме выше",
 
   selection: "Выбор клавиш",
   selectNone: "Снять всё",
@@ -219,9 +253,27 @@ const en: Strings = {
 
   navActuation: "Actuation",
   navRapid: "Rapid Trigger",
+  navSnapTap: "Snap Tap",
   navLighting: "Lighting",
   navSensors: "Sensors",
   navSystem: "System",
+
+  snapTapTitle: "Snap Tap",
+  snapTapHint: "One press gives the first key, two quick presses give the second",
+  snapTapOff: "Snap Tap is off",
+  snapTapOffHint: "Turn it on to configure a key pair",
+  snapTapActive: "Snap Tap configured",
+  snapTapFirstKey: "First key",
+  snapTapSecondKey: "Second key",
+  snapTapResolverMode: "Resolver mode",
+  snapTapThreshold: "Threshold",
+  snapTapDelay: "Delay",
+  snapTapDisable: "Disable Snap Tap",
+  snapTapNote:
+    "The vendor calls these DKSV[0]/DKSV[1]. Their unit has not been measured, so the value is shown raw.",
+  snapTapModeWarning:
+    "The keyboard switches both keys to Single Mode on its own. Disabling restores the modes they had before.",
+  snapTapNeedsTwoKeys: "Pick two different keys in the diagram above",
 
   selection: "Key selection",
   selectNone: "Clear",

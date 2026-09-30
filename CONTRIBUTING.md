@@ -47,10 +47,15 @@ and current Windows 10).
 
 ## Working on the protocol
 
-**Read [docs/PROTOCOL.md](docs/PROTOCOL.md) first.** Every offset in the codebase
-was derived from a real capture, and several are counter-intuitive — colours
-travel BGR, the mode field lives in the high nibble, and single-value replies
-echo the command in byte 5.
+**Read [docs/VENDOR-DRIVER.md](docs/VENDOR-DRIVER.md) first**, then
+[docs/PROTOCOL.md](docs/PROTOCOL.md). The vendor's public driver JavaScript turns
+out to be the authoritative specification, and it corrects things we had wrong:
+Snap Tap and Rapid Switch *are* implemented, per-key deadzones are layouts 22/23
+rather than 6/7, and command 37 returns travel limits we were assuming.
+
+Every offset in the codebase was derived from a real capture, and several are
+counter-intuitive — colours travel BGR, the mode field lives in the high nibble,
+and single-value replies echo the command in byte 5.
 
 If you change a byte offset, add or update a unit test in
 `src-tauri/src/protocol.rs` using a **real captured packet**. That way your change
@@ -101,15 +106,17 @@ Some tests talk to a real keyboard. They are `#[ignore]`d and only run when you
 ask for them:
 
 ```sh
-$env:AULA_HW_TESTS = 1        # PowerShell
-# on Linux/macOS: export AULA_HW_TESTS=1
-cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored hardware --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored hardware
 ```
+
+There is no environment-variable gate — `--ignored` is the only gate. (An older
+revision of this file mentioned `AULA_HW_TESTS=1`; nothing ever read it.)
 
 **Rules if you run these against a keyboard you care about:**
 
-* **Always use `--test-threads=1`.** Two tests sharing one HID handle interleave
-  packets and produce nonsense.
+* Serialisation is handled for you by a mutex in the test module, so
+  `--test-threads=1` is no longer needed. Do not remove the mutex: two tests
+  sharing one HID handle interleave replies and produce nonsense.
 * Each existing hardware test **snapshots the value, writes, verifies, then
   restores**. Follow that pattern in new ones.
 * If a test fails mid-way, restore by hand: `aula-probe state` shows what the

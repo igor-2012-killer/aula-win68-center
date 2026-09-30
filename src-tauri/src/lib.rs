@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 
 use device::{Device, Job, KeyPatch};
-use state::{KeyboardState, Lighting, POLLING_RATES};
+use state::{KeyboardState, Lighting, SnapTap, POLLING_RATES};
 
 type Dev<'a> = State<'a, Arc<Device>>;
 
@@ -82,6 +82,36 @@ fn set_keys_deadzone(
 #[tauri::command]
 fn reset_keys(device: Dev, key_ids: Vec<u16>) -> Result<(), String> {
     apply(device, key_ids, KeyPatch::Reset)
+}
+
+/// Upper bound for the Snap Tap dynamic delay, in milliseconds.
+///
+/// The wire field is 16-bit, so this is a sanity limit rather than a
+/// representability one. `MAX_DELAY_MS` in `src/components/tabs/SnapTapTab.tsx`
+/// must match, otherwise the slider and the backend disagree.
+const MAX_SNAP_TAP_DELAY_MS: u16 = 500;
+
+#[tauri::command]
+fn set_snap_tap(device: Dev, pair: SnapTap) -> Result<(), String> {
+    if pair.key_a == pair.key_b {
+        return Err("Snap Tap needs two different keys".into());
+    }
+    if pair.key_a > 0xFF || pair.key_b > 0xFF {
+        return Err("key id out of range".into());
+    }
+    if pair.mode == 0 {
+        return Err("mode 0 disables Snap Tap — use clear_snap_tap instead".into());
+    }
+    if pair.delay_ms > MAX_SNAP_TAP_DELAY_MS {
+        return Err(format!("delay must be 0..={MAX_SNAP_TAP_DELAY_MS} ms"));
+    }
+    device.request(|tx| Job::SnapTap(Some(pair), tx))
+}
+
+/// Turns Snap Tap off and puts the pair's keys back the way they were.
+#[tauri::command]
+fn clear_snap_tap(device: Dev) -> Result<(), String> {
+    device.request(|tx| Job::SnapTap(None, tx))
 }
 
 #[tauri::command]
@@ -160,6 +190,8 @@ pub fn run() {
             set_keys_rapid_trigger,
             set_keys_deadzone,
             reset_keys,
+            set_snap_tap,
+            clear_snap_tap,
             set_lighting,
             set_polling_rate,
             set_profile,

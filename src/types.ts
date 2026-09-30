@@ -14,6 +14,16 @@ export interface KeySettings {
   release_deadzone: number;
 }
 
+export interface SnapTap {
+  key_a: number;
+  key_b: number;
+  value_a: number;
+  value_b: number;
+  mode: number;
+  key_type: number;
+  delay_ms: number;
+}
+
 export interface Lighting {
   enabled: boolean;
   effect: number;
@@ -57,6 +67,14 @@ export interface KeyboardState {
   global_press_deadzone: number;
   global_release_deadzone: number;
   lighting: Lighting;
+  /**
+   * Configured Snap Tap pair, or `null` when Snap Tap is off.
+   *
+   * `value_a` / `value_b` are raw firmware units — the vendor calls them
+   * `DKSV[0]` / `DKSV[1]` and their unit has not been measured, so the UI does
+   * not present them as millimetres.
+   */
+  snap_tap: SnapTap | null;
   keys: Record<number, KeySettings>;
   layout: KeyDef[];
   presets: [string, number[]][];

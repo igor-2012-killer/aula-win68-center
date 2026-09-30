@@ -67,7 +67,7 @@ what makes the lighting "echo mode" quirk survivable.
 |---|---|
 | `Actuation(mm)` | layout 4 with the value, then layout 8 = `Single << 4` |
 | `RapidTrigger { on, press, release }` | layouts 20 and 21, then layout 8 = `RapidTrigger << 4` or `Global << 4` |
-| `Deadzone { press, release }` | layouts 6 and 7 |
+| `Deadzone { press, release }` | layouts **22 and 23** (`Layout_DP` / `Layout_DR`) |
 | `Reset` | layout 8 = 0 |
 
 Keys are chunked into groups of 14 because that is the firmware's per-packet
@@ -77,6 +77,28 @@ updates immediately; the next full refresh reconciles anything that drifted.
 `KeyMode::wire_value()` exists because the firmware stores the mode field
 verbatim — writing an unshifted nibble would read back as "global" and silently
 lose the setting.
+
+### Snap Tap is not a `KeyPatch`
+
+Snap Tap is a *pair* of keys with its own packet (`cmd 44`), its own read
+addressing and a mode side effect, so it gets its own `Job` rather than being
+squeezed into `KeyPatch`.
+
+Reading it is the awkward part. The firmware addresses the pair by its **first**
+key and offers no way to enumerate addresses, so a read must name a key — and
+`key_a = 0` always answers empty, which is indistinguishable from "nothing
+configured". On connect the driver therefore sweeps all 68 keys once
+(`find_snap_tap`) and caches the address it found; later refreshes cost a single
+query.
+
+Writing has two firmware behaviours worth knowing:
+
+* Configuring a pair switches **both** keys to Single Mode, and clearing the
+  pair does not undo that. `write_snap_tap` captures the modes first and restores
+  them when the pair is cleared.
+* Clearing means writing the *same* `key_b` with zeroed values. Sending
+  `key_b = 0` is refused and leaves the pair in place, so a zeroed pair must be
+  treated as "off" rather than as "configured".
 
 ### Hotplug and the watchdog
 
@@ -158,12 +180,13 @@ with no dependency on the GUI.
 
 The hardware tests restore whatever they change, so they are safe to run against
 a keyboard you care about — but they do write to it, which is why they are
-opt-in:
+opt-in via `#[ignore]`:
 
 ```sh
-$env:AULA_HW_TESTS = 1
-cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored hardware --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored hardware
 ```
 
-They must run single-threaded: two tests sharing one HID handle would interleave
-packets.
+They are serialised by a mutex in the test module rather than by
+`--test-threads=1`, because relying on a command-line flag meant the default
+parallel harness silently corrupted the keyboard's key modes. The mutex is the
+part to preserve.

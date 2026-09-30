@@ -43,24 +43,54 @@ Key selection is shared across every tab: click a key to select it,
 `Ctrl`/`Shift`+click to add to the selection, and the chips give you WASD, QWER,
 arrows, digits, letters, modifiers or everything. Interface is RU/EN.
 
-## What the firmware does not support
+## Status of the features people expect
 
-Some things people expect are simply not in firmware 9.1. They are deliberately
-**absent from the UI** rather than present and broken:
+The authoritative protocol reference turned out to be the **vendor's own public
+driver JavaScript**, not the firmware. See
+[`docs/VENDOR-DRIVER.md`](docs/VENDOR-DRIVER.md). Recovering it corrected several
+conclusions this project had published, so read that file before trusting the
+list below.
 
-* **Snap Tap / SOCD** — command 44 answers reads but always returns zeros.
-  Eleven write variants were rejected. This is the one most likely to change if
-  the vendor ships new firmware.
+Correctly **absent from the UI**:
+
 * **Calibration and factory reset** — the commands do not exist. The old code
-  pointed at 12/13, which are *bootloader* commands (`BL_WRITE`/`BL_READ`); that
-  is why those buttons never did anything.
+  pointed at 12/13, which are *bootloader* commands (`BL_WRITE`/`BL_READ`); the
+  vendor's own enum has the same collision with
+  `START_ADJUSTING`/`SAVE_ADJUSTING`. That is why those buttons never did
+  anything.
 * **Logo / ambient lighting** (command 25) — rejected with `0xFF`.
-* **Mod-Tap (36), Dynamic DKS (39), Rapid Switch (45)** — not implemented.
-* **Global deadzones** — the fields read back as zero. Deadzones are applied
-  per key instead, which does work.
+* **Global deadzones** — the fields in command 41 read back as zero.
+* **Rapid Switch (45)** — never send this one. It answers with a valid-looking
+  frame but persists nothing, and a write **corrupts the mode of five keys**.
+  See [`docs/VENDOR-DRIVER.md` §6](docs/VENDOR-DRIVER.md).
 
-A test pins each of these findings, so a future firmware that adds support fails
-loudly instead of being silently missed.
+**Snap Tap (44) works and is in the UI.** It was previously listed as
+unimplemented, which was wrong: the old probe used the wrong frame (8-bit values,
+6-byte payload) and, more importantly, read with `key_a = 0`, which always
+returns zeros by design. The correct 11-byte dynamic-delay frame round-trips,
+confirmed by `hardware_snap_tap_round_trips` and
+`hardware_snap_tap_is_discoverable_and_clearable`. Pick two keys in the diagram
+and the tab writes the pair, reads it back, and restores both keys' modes when
+you disable it.
+
+Two caveats the UI states rather than hides:
+
+* The firmware switches both keys of the pair to Single Mode on its own, and
+  does not revert that when the pair is cleared, so the app saves and restores
+  the modes itself.
+* The two resolver thresholds are shown as raw values. The vendor calls them
+  `DKSV[0]` / `DKSV[1]`; their unit has not been measured, so presenting them as
+  milliseconds would be a guess.
+
+Also believed to be **implementable**, pending measurement:
+
+* **Per-key deadzones** now write layouts **22/23** (`Layout_DP`/`Layout_DR`),
+  confirmed writable, instead of 6/7 which are `Layout_DB2`/`Layout_DB3` and ship
+  at 2.0/3.0 mm — above the actuation point, so they could make a key unusable.
+* **Mod-Tap (36) and Dynamic DKS (39)** — the vendor driver has UI for both and
+  the relevant feature gates are enabled on this firmware version.
+* **Per-key RGB (42)** — the `DynamicLightColor` gate is enabled here, so the
+  data we were discarding is probably real.
 
 ---
 
@@ -190,6 +220,7 @@ The three modules marked *no Tauri* are included by source path in
 
 | | |
 |---|---|
+| [docs/VENDOR-DRIVER.md](docs/VENDOR-DRIVER.md) | **Start here.** Command and layout enums, feature gating by protocol version, and the real Snap Tap / Rapid Switch frames, recovered from the vendor's public driver JavaScript |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | Frame format, every command, byte offsets, real captured packets, hardware quirks |
 | [docs/RESEARCH-NOTES.md](docs/RESEARCH-NOTES.md) | Working features, dead ends with the variants that were tried, and open questions |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The I/O thread model, reply validation, hotplug handling, module boundaries, testing strategy |
@@ -205,13 +236,13 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 npm run build                 # tsc --noEmit + vite build
 
 # transport and write tests against a real keyboard
-$env:AULA_HW_TESTS = 1        # PowerShell
-cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored hardware --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored hardware
 ```
 
 The hardware tests **write to the keyboard and then restore what they changed**.
-They must run single-threaded, because two tests sharing one HID handle would
-interleave packets.
+They are serialised by a mutex inside the test module, so the default parallel
+harness is safe; `--test-threads=1` is no longer required. Verify with
+`aula-probe state` before and after a run — the output should be identical.
 
 ---
 

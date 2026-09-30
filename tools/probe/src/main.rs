@@ -86,6 +86,8 @@ fn main() -> ExitCode {
         "scan" => cmd_scan(&mut api, &mut link, &positional[1..]),
         "set" => cmd_set(&mut api, &mut link, &positional[1..], confirmed),
         "travel" => cmd_travel(&mut link),
+        "pair" => cmd_pair(&mut link, &positional[1..], confirmed),
+        "layout" => cmd_layout(&mut link, &positional[1..]),
         other => {
             eprintln!("{RED}unknown command{RESET} {other:?} — try --help");
             ExitCode::FAILURE
@@ -110,13 +112,16 @@ fn print_help() {
   {BOLD}scan [--space order|struct] [--from N] [--to N]{RESET}
                                           sweep the command space
   {BOLD}travel{RESET}                           sample the live Hall-sensor matrix
+  {BOLD}pair <snap|switch> <kA> <kB> [vA vB] [mode] [type] [delay] --yes{RESET}
+                                          read (or write) a Snap Tap / Rapid Switch pair
+  {BOLD}layout <id> [ids]{RESET}                  read one per-key register across the keymap
   {BOLD}set <what> <args...> --yes{RESET}      guarded writes
 
 {BOLD}WRITES{RESET}
   set actuation <mm>                    global actuation point
   set key-actuation <ids> <mm>          per-key actuation point
   set rt <ids> <press> <release>        per-key rapid trigger
-  set deadzone <ids> <press> <release>  per-key deadzones
+  set deadzone <ids> <press> <release>  per-key deadzones (layouts 22/23, [--layout N])
   set reset <ids>                       per-key back to global mode
   set polling <index>                   0=8k 1=4k 2=2k 3=1k 4=500   (re-enumerates USB)
   set profile <0-3>                     hardware profile slot
@@ -252,12 +257,48 @@ fn cmd_state(link: &mut Link) -> ExitCode {
         }
     }
 
-    if let Some(r) = link.query(socd_read()) {
-        if r.matches(p::cmd::SOCD) {
-            let (a, b, mode, delay) = r.socd();
-            println!("  snap tap        a={a} b={b} mode={mode} delay={delay}ms  {DIM}(always zero on fw 9.1){RESET}");
+    // Snap Tap reads are keyed by the first key of the pair: a read with keyA set
+// to the key you configured returns that pair, while keyA = 0 always reads
+// back empty. Sweep the physical keys so configured pairs are actually visible.
+{
+    let mut pairs: Vec<String> = Vec::new();
+    for key in keymap::KEYS {
+        let probe = p::pair_packet(
+            false,
+            p::cmd::SOCD,
+            p::KeyPair {
+                key_a: key.id as u8,
+                ..p::KeyPair::CLEARED
+            },
+        );
+        if let Some(r) = link.query(probe) {
+            if !r.matches(p::cmd::SOCD) || r.is_fail() {
+                continue;
+            }
+            let Some(pair) = p::parse_pair(&r.0) else {
+                continue;
+            };
+            if pair.is_cleared() {
+                continue;
+            }
+            pairs.push(format!(
+                "{}[{}]<->[{}] vA={} vB={} mode=0x{:02x} delay={}",
+                key.label,
+                pair.key_a,
+                pair.key_b,
+                pair.value_a,
+                pair.value_b,
+                pair.mode,
+                pair.delay
+            ));
         }
     }
+    if pairs.is_empty() {
+        println!("  snap tap        {DIM}no pairs configured{RESET}");
+    } else {
+        println!("  snap tap        {}", pairs.join("  "));
+    }
+}
 
     let ids = keymap::all_ids();
     for (label, layout_id) in [
@@ -278,14 +319,58 @@ fn cmd_state(link: &mut Link) -> ExitCode {
         let summary: Vec<String> = distinct
             .iter()
             .map(|(v, n)| {
-                if *n == ids.len() {
+                // `0xFFFF` is the firmware's "no data for this key" marker, not
+                // a distance. Esc reports it for the rapid-trigger registers.
+                let shown = if *v == 0xFFFF {
+                    format!("{DIM}no data{RESET} x{n}")
+                } else if *n == ids.len() {
                     format!("{v} (all)")
                 } else {
                     format!("{v} x{n}")
-                }
+                };
+                shown
             })
             .collect();
         println!("  {label}      {}", summary.join(", "));
+
+        // Flag any key that deviates from the most common value. A residue left
+        // behind by an interrupted write shows up here immediately, which is
+        // how you confirm the keyboard really is in a known state.
+        // Report deviations from the most common value, but treat "no data" as its
+        // own bucket: Esc legitimately has no rapid-trigger data and is not
+        // residue. A residue left by an interrupted write shows up here
+        // immediately, which is how you confirm the keyboard is in a known state.
+        let mut buckets: Vec<(Option<u16>, usize)> = Vec::new();
+        for id in &ids {
+            let v = values.get(id).copied().filter(|v| *v != 0xFFFF);
+            match buckets.iter_mut().find(|(value, _)| *value == v) {
+                Some((_, n)) => *n += 1,
+                None => buckets.push((v, 1)),
+            }
+        }
+        let Some((majority, _)) = buckets.iter().max_by_key(|(_, n)| *n) else {
+            continue;
+        };
+        let odd: Vec<String> = ids
+            .iter()
+            .filter(|id| {
+                values.get(id).copied().filter(|v| *v != 0xFFFF) != *majority
+            })
+            .map(|id| {
+                let v = values.get(id).copied().unwrap_or(0xFFFF);
+                let label = keymap::KEYS
+                    .iter()
+                    .find(|k| k.id == *id)
+                    .map(|k| k.label)
+                    .unwrap_or("?");
+                let shown = if v == 0xFFFF { "no data" } else { &v.to_string() };
+                format!("{label}[{id}]={shown}")
+            })
+            .collect();
+        if !odd.is_empty() {
+            let base = majority.map(|v| v.to_string()).unwrap_or_else(|| "no data".into());
+            println!("               {DIM}differs from {base}: {}{RESET}", odd.join(" "));
+        }
     }
 
     println!(
@@ -320,7 +405,6 @@ fn cmd_raw(link: &mut Link, args: &[&str]) -> ExitCode {
     match link.query(packet) {
         Some(r) => {
             dump_packet("rx", &r.0);
-            let _ = link.send(packet);
             ExitCode::SUCCESS
         }
         None => {
@@ -364,7 +448,6 @@ fn cmd_query(link: &mut Link, args: &[&str]) -> ExitCode {
         Some(r) => {
             dump_packet("rx", &r.0);
             classify(&r);
-            let _ = link.send(packet);
             ExitCode::SUCCESS
         }
         None => {
@@ -403,7 +486,6 @@ fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> ExitCode {
             }
             continue;
         };
-        let _ = link.send(packet);
         // Structured commands answer with `id | 0x80`; single-value commands
         // answer with a bare `0x80` and echo the id in byte 5. Anything else is
         // an echo or a leftover packet from the previous probe, so it is
@@ -450,6 +532,172 @@ fn cmd_travel(link: &mut Link) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Reads one per-key `layout` register across the whole keymap.
+///
+/// The vendor's `KeyLayout` enum names several registers this project has never
+/// identified, so this takes a raw layout id and prints whatever comes back.
+/// `0xFFFF` means "the firmware has no data for this key".
+fn cmd_layout(link: &mut Link, args: &[&str]) -> ExitCode {
+    let Some(layout) = args.first().and_then(|v| v.parse::<u8>().ok()) else {
+        eprintln!("usage: aula-probe layout <id> [key ids...]");
+        return ExitCode::FAILURE;
+    };
+    let ids = if args.len() > 1 {
+        match parse_ids(Some(&args[1])) {
+            Some(ids) => ids,
+            None => return usage("layout"),
+        }
+    } else {
+        keymap::all_ids()
+    };
+
+    let values = read_layout(link, layout, &ids);
+    println!("{BOLD}layout {layout}{RESET} {DIM}({}/{} keys answered){RESET}", values.len(), ids.len());
+
+    let mut distinct: Vec<(u16, usize)> = Vec::new();
+    for id in &ids {
+        let v = values.get(id).copied().unwrap_or(0xFFFF);
+        match distinct.iter_mut().find(|(value, _)| *value == v) {
+            Some((_, n)) => *n += 1,
+            None => distinct.push((v, 1)),
+        }
+    }
+    for (v, n) in &distinct {
+        let shown = if *v == 0xFFFF {
+            format!("0xffff {DIM}(no data){RESET}")
+        } else {
+            format!("{v}")
+        };
+        println!("  {shown:>28} x{n}");
+    }
+
+    // Always list the outliers, that is the interesting part.
+    if let Some((majority, _)) = distinct.iter().max_by_key(|(_, n)| *n) {
+        let odd: Vec<String> = ids
+            .iter()
+            .filter(|id| values.get(id).copied().unwrap_or(0xFFFF) != *majority)
+            .map(|id| {
+                let v = values.get(id).copied().unwrap_or(0xFFFF);
+                let label = keymap::KEYS
+                    .iter()
+                    .find(|k| k.id == *id)
+                    .map(|k| k.label)
+                    .unwrap_or("?");
+                format!("{label}[{id}]={v}")
+            })
+            .collect();
+        if !odd.is_empty() {
+            println!("  {DIM}differs from {majority}: {}{RESET}", odd.join(" "));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Snap Tap / Rapid Switch pair, using the dynamic-delay frame from the
+/// vendor's public driver (`SOCDV4Pack`), which is the variant used on protocol
+/// 1.0.9.
+///
+/// Payload: `[rw, keyA, keyB, vA_lo, vA_hi, vB_lo, vB_hi, mode, type, delay_lo,
+/// delay_hi]` — byte 4 is read (0) / write (1) and the values are 16-bit.
+///
+/// The earlier probe used a 5-byte, 8-bit-value frame; the firmware accepts it
+/// but silently discards it, which is why Snap Tap looked unimplemented. See
+/// `docs/VENDOR-DRIVER.md` §6.
+fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
+    if args.len() < 3 {
+        eprintln!(
+            "usage: aula-probe pair <snap|switch> <kA> <kB> [vA vB] [mode] [type] [delay] --yes"
+        );
+        return ExitCode::FAILURE;
+    }
+    let cmd_id = match args[0] {
+        "snap" | "socd" => p::cmd::SOCD,
+        "switch" | "rs" => p::cmd::RAPID_SWITCH,
+        other => {
+            eprintln!("unknown pair kind {other:?} — use `snap` or `switch`");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut nums: Vec<u16> = Vec::new();
+    for a in &args[1..] {
+        match a.parse::<u16>() {
+            Ok(v) => nums.push(v),
+            Err(_) => return usage("pair"),
+        }
+    }
+    let key_a = nums[0] as u8;
+    let key_b = nums[1] as u8;
+    let value_a = nums.get(2).copied().unwrap_or(0);
+    let value_b = nums.get(3).copied().unwrap_or(0);
+    let mode = nums.get(4).copied().unwrap_or(0) as u8;
+    let key_type = nums.get(5).copied().unwrap_or(0) as u8;
+    let delay = nums.get(6).copied().unwrap_or(0);
+    let writing = confirmed;
+
+    if writing {
+        println!(
+            "{YELLOW}writing: keyA=0x{key_a:02x} keyB=0x{key_b:02x} vA={value_a} vB={value_b} \
+             mode={mode} type={key_type} delay={delay}{RESET}"
+        );
+    }
+
+    let pair = p::KeyPair {
+        key_a,
+        key_b,
+        value_a,
+        value_b,
+        mode,
+        key_type,
+        delay,
+    };
+    let packet = p::pair_packet(writing, cmd_id, pair);
+    dump_packet("tx", &packet);
+
+    if let Some(reply) = link.query(packet) {
+        dump_packet("rx", &reply.0);
+        if reply.is_fail() {
+            println!("{RED}refused (0xFF){RESET}");
+            return ExitCode::SUCCESS;
+        }
+        if !reply.matches(cmd_id) {
+            println!("{YELLOW}unexpected reply id{RESET}");
+            return ExitCode::SUCCESS;
+        }
+        if let Some(pair) = p::parse_pair(&reply.0) {
+            println!("  keyA    0x{:02x}", pair.key_a);
+            println!("  keyB    0x{:02x}", pair.key_b);
+            println!("  valueA  {}", pair.value_a);
+            println!("  valueB  {}", pair.value_b);
+            println!("  mode    0x{:02x}", pair.mode);
+            println!("  type    0x{:02x}", pair.key_type);
+            println!("  delay   {}", pair.delay);
+        } else {
+            println!("{YELLOW}reply too short to parse{RESET}");
+        }
+    }
+
+    if !writing {
+        println!("\n{DIM}read only — add --yes to write the values above{RESET}");
+    } else {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let verify = p::pair_packet(false, cmd_id, p::KeyPair::CLEARED);
+        println!("{DIM}verifying...{RESET}");
+        if let Some(r) = link.query(verify) {
+            let v = &r.0;
+            println!(
+                "  readback keyA=0x{:02x} keyB=0x{:02x} vA={} vB={} mode=0x{:02x} delay={}",
+                v[5],
+                v[6],
+                u16::from_le_bytes([v[7], v[8]]),
+                u16::from_le_bytes([v[9], v[10]]),
+                v[11],
+                u16::from_le_bytes([v[13], v[14]])
+            );
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage: aula-probe set <what> <args...> --yes");
@@ -481,7 +729,8 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                     let Some(mm) = args.get(2).and_then(|v| v.parse::<f32>().ok()) else {
                         return usage("set key-actuation <ids> <mm>");
                     };
-                    write_keys(link, &ids, p::layout::ACTUATION, mm * 1000.0);
+                    // `write_keys` takes millimetres and converts internally.
+                    write_keys(link, &ids, p::layout::ACTUATION, mm);
                 }
                 "rt" => {
                     let (Some(press), Some(release)) = (
@@ -490,8 +739,8 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                     ) else {
                         return usage("set rt <ids> <press_mm> <release_mm>");
                     };
-                    write_keys(link, &ids, p::layout::RT_PRESS, press * 1000.0);
-                    write_keys(link, &ids, p::layout::RT_RELEASE, release * 1000.0);
+                    write_keys(link, &ids, p::layout::RT_PRESS, press);
+                    write_keys(link, &ids, p::layout::RT_RELEASE, release);
                     // Rapid Trigger lives in the high nibble of the mode field.
                     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
                         let values = vec![(p::touch_mode::RAPID_TRIGGER as u16) << 4; chunk.len()];
@@ -504,10 +753,20 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                         args.get(2).and_then(|v| v.parse::<f32>().ok()),
                         args.get(3).and_then(|v| v.parse::<f32>().ok()),
                     ) else {
-                        return usage("set deadzone <ids> <press_mm> <release_mm>");
+                        return usage("set deadzone <ids> <press_mm> <release_mm> [--layout N]");
                     };
-                    write_keys(link, &ids, p::layout::PRESS_DEADZONE, press * 1000.0);
-                    write_keys(link, &ids, p::layout::RELEASE_DEADZONE, release * 1000.0);
+                    // `--layout N` overrides the register pair so both candidate
+                    // encodings can be compared on real hardware: 22/23 are the
+                    // vendor's `Layout_DP`/`Layout_DR`, 6/7 are `Layout_DB2/3`.
+                    let (press_layout, release_layout) = match flag(args, "layout") {
+                        Some(v) => match v.parse::<u8>() {
+                            Ok(press_layout) => (press_layout, press_layout + 1),
+                            Err(_) => return usage("set deadzone <ids> <press_mm> <release_mm> [--layout N]"),
+                        },
+                        None => (p::layout::DEAD_PRESS, p::layout::DEAD_RELEASE),
+                    };
+                    write_keys(link, &ids, press_layout, press);
+                    write_keys(link, &ids, release_layout, release);
                 }
                 "reset" => {
                     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
@@ -659,8 +918,14 @@ fn write_actuation(link: &mut Link, mm: f32) {
     ));
 }
 
-fn write_keys(link: &mut Link, ids: &[u16], layout_id: u8, value: f32) {
-    let um = (value.clamp(0.0, 65.535) * 1000.0) as u16;
+/// Writes one value to a per-key `layout` register for every id.
+///
+/// Takes **millimetres** and converts to the micrometres the firmware expects.
+/// Callers must not pre-multiply: an earlier version of this function's callers
+/// did, which silently produced `0xFFFF` ("no data") for every write and made
+/// perfectly good registers look read-only.
+fn write_keys(link: &mut Link, ids: &[u16], layout_id: u8, value_mm: f32) {
+    let um = (value_mm.clamp(0.0, 65.535) * 1000.0) as u16;
     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
         let values = vec![um; chunk.len()];
         let _ = link.send(p::key_layout_packet(true, layout_id, chunk, &values));
@@ -689,9 +954,12 @@ fn struct_read(id: u8) -> [u8; p::PACKET_LEN] {
     buf
 }
 
-/// Read-mode SOCD query. Kept here rather than in `protocol.rs` because the app
-/// does not use it: Snap Tap is not configurable on firmware 9.1 and the packet
-/// builder was deleted. The probe keeps it so the dead end stays verifiable.
+/// The old read-mode SOCD query, kept only so the dead end stays reproducible.
+///
+/// This 6-byte shape is **not** what the vendor driver sends. Snap Tap does work
+/// on this firmware — use `p::pair_packet(false, p::cmd::SOCD, key_a, ...)`
+/// instead. See `docs/VENDOR-DRIVER.md` §6.
+#[allow(dead_code)]
 fn socd_read() -> [u8; p::PACKET_LEN] {
     let mut buf = [0u8; p::PACKET_LEN];
     buf[0] = p::HEADER;

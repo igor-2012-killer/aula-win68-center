@@ -5,15 +5,25 @@ import { useStore } from "./store";
 import { Keyboard } from "./components/Keyboard";
 import { ActuationTab } from "./components/tabs/ActuationTab";
 import { RapidTab } from "./components/tabs/RapidTab";
+import { SnapTapTab } from "./components/tabs/SnapTapTab";
 import { LightingTab } from "./components/tabs/LightingTab";
 import { SensorsTab } from "./components/tabs/SensorsTab";
 import { SystemTab } from "./components/tabs/SystemTab";
 
-type TabId = "actuation" | "rapid" | "lighting" | "sensors" | "system";
+type TabId = "actuation" | "rapid" | "snaptap" | "lighting" | "sensors" | "system";
 
-const TABS: [TabId, "navActuation" | "navRapid" | "navLighting" | "navSensors" | "navSystem"][] = [
+type NavKey =
+  | "navActuation"
+  | "navRapid"
+  | "navSnapTap"
+  | "navLighting"
+  | "navSensors"
+  | "navSystem";
+
+const TABS: [TabId, NavKey][] = [
   ["actuation", "navActuation"],
   ["rapid", "navRapid"],
+  ["snaptap", "navSnapTap"],
   ["lighting", "navLighting"],
   ["sensors", "navSensors"],
   ["system", "navSystem"],
@@ -122,7 +132,10 @@ export function App() {
             {tab === "rapid" ? (
               <RapidTab state={state} lang={lang} selection={selection} run={run} />
             ) : null}
-            {tab === "lighting" ? <LightingTab state={state} lang={lang} run={run} /> : null}
+            {tab === "snaptap" ? (
+        <SnapTapTab state={state} lang={lang} selection={selection} run={run} />
+      ) : null}
+      {tab === "lighting" ? <LightingTab state={state} lang={lang} run={run} /> : null}
             {tab === "sensors" ? <SensorsTab state={state} lang={lang} sensors={sensors} /> : null}
             {tab === "system" ? <SystemTab state={state} lang={lang} run={run} /> : null}
           </div>

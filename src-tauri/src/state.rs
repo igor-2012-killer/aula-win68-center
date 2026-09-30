@@ -109,6 +109,53 @@ impl Default for Lighting {
     }
 }
 
+/// A configured Snap Tap pair.
+///
+/// Snap Tap switches a single key between two outputs: press once for the first
+/// key, tap twice for the second. The firmware stores it as an "advanced key"
+/// pair addressed by the **first** key, which is why reading it needs a sweep —
+/// see `docs/VENDOR-DRIVER.md` §6.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SnapTap {
+    /// First key of the pair, by HID id. This is the read address.
+    pub key_a: u16,
+    /// Second key of the pair.
+    pub key_b: u16,
+    /// Resolver threshold for the first key, in firmware units.
+    ///
+    /// The vendor calls these `DKSV[0]` and `DKSV[1]`. Their unit has not been
+    /// confirmed by measurement, so the UI labels them as raw values rather
+    /// than pretending to be milliseconds.
+    pub value_a: u16,
+    /// Resolver threshold for the second key.
+    pub value_b: u16,
+    /// Resolver mode. `0` means Snap Tap is off for this pair.
+    pub mode: u8,
+    /// Trigger type, as sent by the vendor driver.
+    pub key_type: u8,
+    /// Dynamic delay in milliseconds.
+    pub delay_ms: u16,
+}
+
+impl SnapTap {
+    /// True when the pair is stored but inactive.
+    pub fn is_inactive(&self) -> bool {
+        self.mode == 0 && self.value_a == 0 && self.value_b == 0
+    }
+}
+
+/// A key mode captured before Snap Tap overwrote it.
+///
+/// Writing a Snap Tap pair makes the firmware switch both keys to Single Mode and
+/// clearing the pair does not undo that. The only way to put a key back the way
+/// the user had it is to remember the mode from *before* the write — reading it
+/// afterwards just reads back the Single Mode the write caused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedKeyMode {
+    pub key_id: u16,
+    pub mode: KeyMode,
+}
+
 /// Everything the UI needs in one payload.
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyboardState {
@@ -130,6 +177,13 @@ pub struct KeyboardState {
     pub global_press_deadzone: f32,
     pub global_release_deadzone: f32,
     pub lighting: Lighting,
+    /// Configured Snap Tap pair, or `None` when Snap Tap is off.
+    pub snap_tap: Option<SnapTap>,
+    /// Key modes to restore when the Snap Tap pair is cleared or changed.
+    ///
+    /// Internal bookkeeping, not part of the UI payload.
+    #[serde(skip)]
+    pub snap_tap_saved_modes: Vec<SavedKeyMode>,
     pub keys: HashMap<u16, KeySettings>,
     pub layout: Vec<KeyDef>,
     pub presets: Vec<(&'static str, Vec<u16>)>,
@@ -159,6 +213,8 @@ impl Default for KeyboardState {
             global_press_deadzone: 0.2,
             global_release_deadzone: 0.3,
             lighting: Lighting::default(),
+            snap_tap: None,
+            snap_tap_saved_modes: Vec::new(),
             keys,
             layout: keymap::KEYS.to_vec(),
             presets: keymap::presets(),
