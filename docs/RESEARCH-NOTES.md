@@ -359,6 +359,34 @@ Anyone with a logic analyser or a firmware dump could settle this quickly.
 
 ---
 
+## Esc's rapid-trigger registers do not follow the normal convention
+
+Worth recording because it silently damaged test runs rather than failing them.
+
+* Factory state is `0xFFFF`, the firmware's "no data" marker, like every other
+  key that has no rapid-trigger data.
+* **Writing 20 to Esc reads back as 20000** — a factor of 1000 that no other key
+  shows.
+* The `0xFFFF` marker **cannot be reproduced by writing**. Writing 0 yields 0, not
+  "no data".
+
+The second point is the trap. A test that snapshots a value and restores it will
+happily read back its own earlier damage as the "original" and put it straight
+back, so a wrong value becomes permanent and self-perpetuating. That is exactly
+what happened: `aula-probe state` reported `300 x1, 20 x67` for Esc's rapid
+trigger long after any test had run.
+
+The hardware tests now use a mid-board key (`PROBE_KEY`, T) instead of
+`all_ids()[0]`, which was Esc. A key that behaves predictably makes the restore
+assertion meaningful instead of circular.
+
+Esc itself is currently left at 0 for both rapid-trigger registers. It sits in
+Global mode, where those registers do not apply, so this is inert — but the
+factory `0xFFFF` is not reachable through the protocol and would need a firmware
+dump to explain.
+
+---
+
 ## Migration note for 2.0.0
 
 Earlier builds of this app wrote per-key deadzones to layouts 6 and 7, which the

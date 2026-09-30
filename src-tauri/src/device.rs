@@ -1253,6 +1253,19 @@ mod hardware {
         (api, link, guard)
     }
 
+    /// A mid-board key for destructive write tests.
+    ///
+    /// Deliberately **not** `all_ids()[0]`, which is Esc. Esc's rapid-trigger
+    /// registers do not follow the normal convention: a written 20 reads back as
+    /// 20000, and the firmware's `0xFFFF` "no data" marker cannot be reproduced
+    /// by writing. A test that snapshotted Esc and restored it therefore
+    /// enshrined whatever residue it found — once the value was wrong it stayed
+    /// wrong, because the "original" it read back was its own earlier damage.
+    ///
+    /// A key from the middle of the board behaves normally, so a restore is
+    /// actually verifiable.
+    const PROBE_KEY: u16 = 23; // T
+
     fn query_order(link: &mut Link, cmd: u8) -> u8 {
         link.query(p::cmd_packet(cmd, None))
             .filter(|r| r.matches_order(cmd))
@@ -1414,7 +1427,7 @@ mod hardware {
         // ship at 2.0/3.0 mm — above the actuation point, so the control was both
         // mislabelled and capable of making a key unusable.
         let (_api, mut link, _guard) = link();
-        let probe_id = keymap::all_ids()[0];
+        let probe_id = PROBE_KEY;
 
         let read = |link: &mut Link, layout: u8| -> u16 {
             read_layout(link, layout, &[probe_id])
