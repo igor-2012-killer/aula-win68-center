@@ -1,4 +1,4 @@
-//! `aula-probe` — a dependency-light HID probing tool for Aula magnetic
+﻿//! `aula-probe` — a dependency-light HID probing tool for Aula magnetic
 //! keyboards.
 //!
 //! It exists so that protocol research does not require building the GUI. It
@@ -88,6 +88,7 @@ fn main() -> ExitCode {
         "travel" => cmd_travel(&mut link),
         "pair" => cmd_pair(&mut link, &positional[1..], confirmed),
         "layout" => cmd_layout(&mut link, &positional[1..]),
+        "grid" => cmd_grid(&mut link),
         other => {
             eprintln!("{RED}unknown command{RESET} {other:?} — try --help");
             ExitCode::FAILURE
@@ -115,6 +116,7 @@ fn print_help() {
   {BOLD}pair <snap|switch> <kA> <kB> [vA vB] [mode] [type] [delay] --yes{RESET}
                                           read (or write) a Snap Tap / Rapid Switch pair
   {BOLD}layout <id> [ids]{RESET}                  read one per-key register across the keymap
+  {BOLD}grid{RESET}                              live sensor grid, raw rows/cols, no labels
   {BOLD}set <what> <args...> --yes{RESET}      guarded writes
 
 {BOLD}WRITES{RESET}
@@ -588,6 +590,73 @@ fn cmd_layout(link: &mut Link, args: &[&str]) -> ExitCode {
             .collect();
         if !odd.is_empty() {
             println!("  {DIM}differs from {majority}: {}{RESET}", odd.join(" "));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Prints the live sensor grid as raw row/col values, with no key labels.
+///
+/// This is how the keymap's `row`/`col` assignment gets verified: press one key,
+/// see which cell lights up, and compare it against what the keymap claims. A
+/// label-based view cannot detect a systematic off-by-one because it is wrong in
+/// exactly the same way.
+fn cmd_grid(link: &mut Link) -> ExitCode {
+    println!("{BOLD}live sensor grid{RESET} {DIM}(mm, 6 rows x 21 cols, raw){RESET}\n");
+    let mut grid = vec![f32::NAN; 6 * 21];
+    for half in 1..=2u8 {
+        let Some(raw) = link.query_multi(p::realtime_travel_packet(half), 192) else {
+            println!("{RED}half {half}: no reply{RESET}");
+            continue;
+        };
+        let base = if half == 1 { 0 } else { 63 };
+        for cell in 0..63usize {
+            let at = 6 + cell * 2;
+            if at + 1 >= raw.len() {
+                break;
+            }
+            let v = u16::from_le_bytes([raw[at], raw[at + 1]]) as f32 / 1000.0;
+            if base + cell < grid.len() {
+                grid[base + cell] = v;
+            }
+        }
+    }
+
+    for row in 0..6usize {
+        print!("  row {row}: ");
+        for col in 0..21usize {
+            let v = grid[row * 21 + col];
+            if v.is_nan() {
+                print!("  -- ");
+            } else if v > 0.05 {
+                // Highlight anything actually pressed, with its index.
+                print!(" {v:>5.2}*");
+            } else {
+                print!(" {v:>5.2} ");
+            }
+        }
+        println!();
+    }
+
+    let hot: Vec<String> = grid
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| !v.is_nan() && **v > 0.05)
+        .map(|(i, v)| {
+            let key = keymap::KEYS.iter().find(|k| k.row as usize * 21 + k.col as usize == i);
+            match key {
+                // Show both claims so a mismatch is obvious.
+                Some(k) => format!("idx {i} (r{},c{}) = {} [app says {}]", i / 21, i % 21, v, k.label),
+                None => format!("idx {i} (r{},c{}) = {} [no key]", i / 21, i % 21, v),
+            }
+        })
+        .collect();
+    if hot.is_empty() {
+        println!("\n  {DIM}nothing pressed{RESET}");
+    } else {
+        println!("\n  {BOLD}pressed:{RESET}");
+        for h in &hot {
+            println!("    {h}");
         }
     }
     ExitCode::SUCCESS

@@ -214,6 +214,27 @@ fn write_pair(link: &mut Link, pair: p::KeyPair) {
     }
 }
 
+/// Maps a value inside a half of the real-time travel reply to a grid index.
+///
+/// The reply arrives as two 63-value packets, each covering three of the six
+/// sensor rows, and the rows are **zero-based**: half 1 carries grid rows 0-2 and
+/// half 2 carries rows 3-5.
+///
+/// This was wrong by one row for a long time. `base_row` used to start at 1 for
+/// half 1, which pushed every value down a row, so pressing `1` highlighted `Q`
+/// and pressing `Q` highlighted `A`. The keymap was correct all along; only this
+/// mapping was wrong, which is why a label-based view could not detect it.
+fn sensor_index(half: u8, value: usize) -> Option<usize> {
+    const COLS: usize = 21;
+    let base_row = match half {
+        1 => 0,
+        2 => 3,
+        _ => return None,
+    };
+    let index = (base_row + value / COLS) * COLS + value % COLS;
+    (index < SENSOR_COUNT).then_some(index)
+}
+
 /// Reads the current mode of each key, skipping any that do not answer.
 fn read_key_modes(link: &mut Link, ids: &[u16]) -> Vec<SavedKeyMode> {
     let values = read_layout(link, p::layout::MODE, ids);
@@ -999,17 +1020,14 @@ impl Worker {
             let Some(raw) = link.query_multi(p::realtime_travel_packet(half), 192) else {
                 continue;
             };
-            // Verified layout: 6-byte preamble, then 63 little-endian u16
-            // values covering three sensor rows.
-            let base_row = if half == 1 { 1 } else { 4 };
+            // Verified layout: 6-byte preamble, then 63 little-endian u16 values
+            // covering three sensor rows.
             for value in 0..63usize {
                 let at = 6 + value * 2;
                 if at + 1 >= raw.len() {
                     break;
                 }
-                let row = base_row + (value / 21) as u8;
-                let index = row as usize * 21 + (value % 21);
-                if index < SENSOR_COUNT {
+                if let Some(index) = sensor_index(half, value) {
                     frame[index] = u16::from_le_bytes([raw[at], raw[at + 1]]);
                 }
             }
@@ -1100,6 +1118,54 @@ mod unit {
         assert_eq!(p::layout::DEAD_RELEASE, 23);
         assert_ne!(p::layout::DEAD_PRESS, p::layout::PRESS_DEADZONE);
         assert_ne!(p::layout::DEAD_RELEASE, p::layout::RELEASE_DEADZONE);
+    }
+
+    #[test]
+    fn sensor_rows_are_zero_based() {
+        // Pinned against hardware: pressing `1` lights grid index 22, which the
+        // keymap labels `1`. With the old off-by-one base row that value landed
+        // on index 43 and the UI showed `Q`.
+        assert_eq!(sensor_index(1, 22), Some(22), "the `1` key's sensor");
+        assert_eq!(sensor_index(2, 22), Some(85), "same column, second half");
+
+        // Half 1 is rows 0-2, half 2 is rows 3-5.
+        assert_eq!(sensor_index(1, 0), Some(0));
+        assert_eq!(sensor_index(1, 20), Some(20));
+        assert_eq!(sensor_index(1, 21), Some(21), "start of the second row");
+        assert_eq!(sensor_index(1, 42), Some(42));
+        assert_eq!(sensor_index(1, 62), Some(62), "last value of half 1");
+        assert_eq!(sensor_index(2, 0), Some(63), "half 2 starts at row 3");
+        assert_eq!(sensor_index(2, 62), Some(125));
+
+        // Every index the firmware can produce must be inside the grid, and no
+        // two may collide.
+        let mut seen = std::collections::HashSet::new();
+        for half in 1..=2u8 {
+            for value in 0..63usize {
+                let index = sensor_index(half, value).expect("in range");
+                assert!(index < SENSOR_COUNT, "index {index} out of range");
+                assert!(seen.insert(index), "index {index} produced twice");
+            }
+        }
+        assert_eq!(seen.len(), 126, "all 126 cells must be addressable");
+    }
+
+    #[test]
+    fn sensor_index_rejects_an_unknown_half() {
+        assert_eq!(sensor_index(0, 0), None);
+        assert_eq!(sensor_index(3, 0), None);
+    }
+
+    #[test]
+    fn every_key_maps_to_a_cell_the_firmware_can_fill() {
+        for key in keymap::KEYS {
+            let index = key.row as usize * 21 + key.col as usize;
+            assert!(
+                index < SENSOR_COUNT,
+                "{} claims cell {index}, outside the grid",
+                key.label
+            );
+        }
     }
 
     #[test]
