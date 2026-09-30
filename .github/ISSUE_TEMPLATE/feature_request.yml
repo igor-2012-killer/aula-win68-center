@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest an improvement to the app
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if the feature requires something the firmware does not
+        implement, it will be declined or redirected to a
+        [protocol research](protocol_research.yml) issue. Check
+        [what firmware 9.1 supports](https://github.com/igor-2012-killer/aula-win68-center/blob/main/docs/RESEARCH-NOTES.md)
+        first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation, not the solution.
+      placeholder: Adjusting the actuation point on four keys at once means dragging each one separately.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Actuation
+        - Rapid Trigger
+        - Lighting
+        - Sensors
+        - System
+        - Keyboard diagram / selection
+        - Interface, layout or theming
+        - Documentation
+        - Build, packaging or platform support
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you like to implement this?
+      options:
+        - label: I would like to send a pull request for this
+        - label: I could help test it
+        - label: No, just suggesting

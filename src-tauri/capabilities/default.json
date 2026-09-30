@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main control panel window",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

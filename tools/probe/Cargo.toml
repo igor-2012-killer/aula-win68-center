@@ -1,0 +1,22 @@
+[package]
+name = "aula-probe"
+version = "2.0.0"
+description = "Standalone HID probing tool for Aula magnetic keyboards"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "aula-probe"
+path = "src/main.rs"
+
+# Only the transport dependencies. The protocol and HID layers are shared with
+# the GUI app by source inclusion (`#[path]`), so a capture taken with this
+# tool is byte-for-byte comparable with what the app sends.
+[dependencies]
+hidapi = "2.6"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+strip = true

@@ -1,0 +1,96 @@
+name: Bug report
+description: Something in the app does not work
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this. The fastest diagnosis is usually
+        `aula-probe state` output — it shows exactly what the keyboard thinks
+        its own settings are.
+
+        ```
+        cargo run --manifest-path tools/probe/Cargo.toml --release -- state
+        ```
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+      placeholder: Dragging the actuation slider shows 1.20 mm but the keyboard still fires at 2.00 mm.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Actuation tab
+        2. Select WASD using the chip
+        3. Drag "Point of activation" to 0.5
+    validations:
+      required: true
+
+  - type: input
+    id: keyboard
+    attributes:
+      label: Keyboard model
+      placeholder: WIN68 HE Pro
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: Shown in the title bar as "FW x.y"
+      placeholder: "9.1"
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: From the release you downloaded
+      placeholder: v2.0.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe-state
+    attributes:
+      label: `aula-probe state` output
+      description: Paste the whole thing. It is short and it is the most useful diagnostic we have.
+      render: text
+      placeholder: |
+          name            WIN 68 HE PRO
+          firmware        9.1
+          travel          20..3400 um, step 20 um
+          actuation       2000 um (2.00 mm)
+          ...
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Application log
+      description: |
+        `%LOCALAPPDATA%\com.aula.win68.center\logs\Aula WIN68 Center.log`
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I restored my keyboard settings (or the app never changed them)
+          required: false
+        - label: This is not a request for a feature the firmware does not support
+          required: false
+
+  - type: textarea
+    id: anything
+    attributes:
+      label: Anything else

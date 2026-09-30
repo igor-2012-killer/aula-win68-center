@@ -1,0 +1,8 @@
+# Normalise line endings so the repo does not depend on core.autocrlf.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.msi binary

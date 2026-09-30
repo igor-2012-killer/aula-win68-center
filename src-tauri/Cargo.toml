@@ -1,0 +1,34 @@
+[package]
+name = "aula-win68-center"
+version = "2.0.0"
+description = "Native control panel for the Aula WIN68 HE Pro magnetic keyboard"
+authors = ["Antigravity"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "aula_win68_center_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# `tauri build` turns this on. Without it Tauri serves `devUrl`, so a plain
+# `cargo build --release` produces a binary that waits on the Vite dev server.
+default = []
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+hidapi = "2.6"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

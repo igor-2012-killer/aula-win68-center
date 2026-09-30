@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      # Produces the NSIS installer plus the standalone binary.
+      - name: Build
+        run: npm run app:build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/aula-win68-center.exe
+          draft: true
+          generate_release_notes: true
+          body: |
+            ## Installing
+
+            Run the `.exe` installer. Windows x64, installs for the current user,
+            no administrator rights required.
+
+            If you prefer a portable binary, grab `aula-win68-center.exe` from the
+            assets and run it directly — it needs no runtime installed.
+
+            ## Before you report a problem
+
+            `aula-probe state` shows exactly what the keyboard reports about
+            itself, and is the fastest way to diagnose anything that looks wrong:
+
+            ```
+            cargo run --manifest-path tools/probe/Cargo.toml --release -- state
+            ```
+
+            ## Reminders
+
+            * The app writes to real hardware. Snapshots are restored, but if you
+              have a specific configuration you care about, note it before
+              experimenting.
+            * Some features do not exist in firmware 9.1 — see
+              [RESEARCH-NOTES](https://github.com/igor-2012-killer/aula-win68-center/blob/main/docs/RESEARCH-NOTES.md).

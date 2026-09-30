@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck and build
+        run: npm run build
+
+  backend:
+    name: Backend (test + clippy + fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Unit tests
+        # No hardware in CI: the hardware suite is #[ignore]d and excluded here.
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+  probe:
+    name: Protocol tool builds standalone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/probe -> target
+
+      # The probe includes protocol.rs / hid.rs / keymap.rs by source path, so
+      # it catches those modules drifting away from the app.
+      - run: cargo build --manifest-path tools/probe/Cargo.toml --release
+
+  windows:
+    name: Windows app build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Build release binary
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --features custom-protocol
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aula-win68-center
+          path: src-tauri/target/release/aula-win68-center.exe
+          if-no-files-found: error
+
+  docs:
+    name: Docs links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      # Catches broken relative links between README / docs / templates, which
+      # is the most common way this repo rots.
+      - name: Check relative markdown links
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r file; do
+            dir="$(dirname "$file")"
+            grep -oE '\]\(([^)#][^)]*)\)' "$file" \
+              | sed -E 's/^\]\((.*)\)$/\1/' \
+              | grep -vE '^(https?:|mailto:|#)' \
+              | while IFS= read -r link; do
+                  target="${link%%#*}"
+                  [ -z "$target" ] && continue
+                  if [ ! -e "$dir/$target" ]; then
+                    echo "::error file=$file::broken link -> $link"
+                    fail=1
+                  fi
+                done || fail=1
+          done < <(find . -name '*.md' -not -path './node_modules/*' -not -path './.git/*')
+          exit "$fail"

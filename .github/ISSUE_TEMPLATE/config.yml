@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/igor-2012-killer/aula-win68-center/security/advisories/new
+    about: Report privately instead of opening a public issue. See SECURITY.md.
+  - name: Protocol research
+    url: https://github.com/igor-2012-killer/aula-win68-center/issues/new?template=protocol_research.yml
+    about: Found firmware internals, a capture, or know something about the protocol? Start here.

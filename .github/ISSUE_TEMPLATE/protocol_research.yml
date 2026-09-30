@@ -1,0 +1,99 @@
+name: Protocol research
+description: You know something about this keyboard's firmware or protocol
+labels: ["protocol", "research", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## You do not have to write any code.
+
+        This project exists partly because information about these keyboards is
+        scarce and scattered. If you have firmware internals, a newer protocol
+        version, the vendor's own source, or just a capture that means something
+        to you — this is the place for it, and it is genuinely valuable even if
+        you never touch the codebase.
+
+        Check [the open questions](https://github.com/igor-2012-killer/aula-win68-center/blob/main/docs/RESEARCH-NOTES.md#open-questions)
+        first — your answer may already be listed there.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of information is this?
+      options:
+        - Firmware source, disassembly, or symbol names
+        - A newer firmware version that adds features
+        - Documentation from the vendor
+        - A packet capture or trace
+        - Behaviour observed by testing, not by reading code
+        - The vendor's own driver working differently than ours does
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Which open question does this answer, or what is the finding?
+      description: |
+        Copy the question number from RESEARCH-NOTES.md if it matches one.
+      placeholder: "Question 1 — Snap Tap is implemented in fw 2.3 as command 44 with a write flag of 2."
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: Details
+      description: |
+        Function names, offsets, structure layouts, register names — whatever
+        you have. Hex is fine.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: captures
+    attributes:
+      label: Packet captures
+      description: |
+        If you have any, paste both request and reply. You do not need to decode
+        them. `aula-probe raw <hex>` is the easiest way to produce one.
+
+        Format, one per line:
+        ```
+        tx  5c 05 23 bc 01 04 04 20 03
+        rx  5c 05 a3 6d 00 29 08 00 00
+        ```
+      render: text
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version tested
+      placeholder: "9.1"
+
+  - type: input
+    id: model
+    attributes:
+      label: Keyboard model
+      placeholder: WIN68 HE Pro
+
+  - type: textarea
+    id: vendor-source
+    attributes:
+      label: About the source material
+      description: |
+        Only if relevant. Please do not paste proprietary code wholesale —
+        reference where you found it, and quote the specific offsets or field
+        names you are pointing at.
+      render: text
+
+  - type: checkboxes
+    id: can-share
+    attributes:
+      label: Can you share your material?
+      options:
+        - label: Yes, I can provide more detail on request
+        - label: No, this is all I have
+        - label: I would rather discuss privately
