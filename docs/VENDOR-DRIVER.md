@@ -366,16 +366,27 @@ The driver labels its two drop targets in the template, and the labels matter:
 
 | target | template label | writes |
 |---|---|---|
-| first | `messages.hold` | `DKS[0]`, `modifier_a` |
-| second | `messages.click` | `DKS[1]`, `modifier_b` |
+| first | `messages.hold` | `DKS[0]`, `hold_key` |
+| second | `messages.click` | `DKS[1]`, `tap_key` |
 
-So by the vendor's own naming the first 16-bit value is the **hold** output and
-the second is the **click** (tap) output. The delay stayed at `0x14` because the
-UI default is 200 ms and the driver divides by 10.
+The delay stayed at `0x14` because the UI default is 200 ms and the driver
+divides by 10.
 
-What remains unknown is whether the firmware honours those labels: pressing `T`
-has to be observed to tell whether a short press emits `DKS[1]` and a long press
-emits `DKS[0]`. See "Capture setup" below.
+**The firmware honours those labels.** With `hold_key = Z` and `tap_key = E`
+assigned to `T` through the driver, a short press produced `E` and a press held
+past the threshold produced `Z`. Reading the pair back over our own protocol
+gave the same `0x001d` / `0x0008` / 200 ms.
+
+So Mod-Tap is fully understood:
+
+| slot | meaning | fires when |
+|---|---|---|
+| `hold_key` | output key on hold | press lasts longer than `delay` |
+| `tap_key` | output key on tap | press released before `delay` |
+
+`protocol::ModTap` names its fields `hold_key` and `tap_key` for this reason.
+Note both are full HID usage ids, not modifier codes: `Z` and `E` are ordinary
+letters and both worked.
 
 ### Rapid Switch (45) — never send this
 

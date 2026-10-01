@@ -32,6 +32,7 @@ Verified by write → read-back on real hardware, and pinned by the tests in
 | Rapid trigger | 35 / layouts 20, 21, 8 | |
 | Per-key deadzones | 35 / layouts **22, 23** — *pending verification* | previously believed to be 6, 7; the vendor names 22/23 `Layout_DP`/`Layout_DR` |
 | **Snap Tap** | **44, dynamic-delay frame** | **works** — writable, persistent, no commit step; forces both keys to Single Mode |
+| **Mod-Tap** | **36, `MTPack`** | **works** — 7-byte frame; first u16 is the hold key, second is the tap key, delay is the threshold in 10 ms units |
 | Lighting | 24 | 43-byte payload, BGR colours |
 | Polling rate | 80 | re-enumerates USB |
 | Hardware profiles | 112 | |
@@ -113,13 +114,18 @@ The test that used to pin the old conclusion,
 `hardware_snap_tap_is_read_only_on_firmware_9_1`, has been **deleted and
 replaced**. Its name asserted something now known to be false.
 
-### Mod-Tap (36), Dynamic DKS (39)
+### Mod-Tap (36) — **WORKS** (previous conclusion was wrong)
 
-All answer with `0xFF` and a payload of `0xFF` bytes. Unimplemented *as probed*.
-The vendor driver confirms both exist on this generation (`advancedKeyV2` is on
-for `1.0.9`, and `Layout_MTDelay` is `value * 10` ms), so these deserve the same
-treatment as Snap Tap: check the frame shape in [`VENDOR-DRIVER.md`](VENDOR-DRIVER.md)
-before declaring them dead.
+This section used to sit under "dead ends" with the note that it answered `0xFF`.
+That was a probing artefact, not the feature: the frame needed the right shape
+before the board would talk. `MTPack` is 7 bytes and `protocol::mod_tap_packet`
+builds it; the firmware sets the key's `layout 8` low nibble to `3`; both output
+slots work as tap and hold keys. See "Advanced keys" below for the full frame
+and the semantics, including which row of which table misled me.
+
+Dynamic DKS (39) is still unexamined. It answers `0xFF` as probed and the vendor
+driver ships a page for it, so check the frame shape in
+[`VENDOR-DRIVER.md`](VENDOR-DRIVER.md) before calling it dead.
 
 ### Rapid Switch (45) — **never send this command**
 
@@ -261,7 +267,11 @@ also what Esc legitimately reports for its rapid-trigger registers.
 
 ---
 
-## Advanced keys: storage works, behaviour does not
+## Advanced keys: Mod-Tap works, Snap Tap storage works but behaviour does not
+
+This section originally read "storage works, behaviour does not" for both
+features, on the strength of the table further down. Mod-Tap turned out to work
+fine; the table had been misread. The corrected reading is below.
 
 Snap Tap and Mod-Tap are both stored correctly and neither can be made to
 behave. They fail the same way and probably for the same reason, so they are
@@ -289,13 +299,13 @@ was written. The firmware also flips the key's mode nibble to match the type.
   protocol `1.0.9`, so the 16-bit branch is the right one.
 * Writes persist and read back identically, verified independently of the write.
 * The firmware sets the key's `layout 8` low nibble to `3` for Mod-Tap.
-* The delay byte is a **real threshold**: at byte 20 the tap branch produced
-  nothing and a short press did not register; at byte 2 it produced a tap. So the
-  driver's `Delay / 10` scaling is directionally right.
+* The delay byte is a **real threshold**, and both branches work. At the driver's
+  200 ms default, a short press emits `tap_key` and a longer press emits
+  `hold_key`. The `Delay / 10` scaling is confirmed in both directions.
 
-### What is not
+### The table that started it
 
-Mod-Tap never emits its second value.
+Mod-Tap appeared never to emit its second value:
 
 | `DKS[0]` | `DKS[1]` | delay | observed |
 |---|---|---|---|
@@ -304,17 +314,33 @@ Mod-Tap never emits its second value.
 | `0x17` T | `0x28` Enter | 20 ms | tap `t`, no newlines on hold |
 | `0x1D` Z | `0x28` Enter | 20 ms | **tap `Z`, hold `Z`**, even pressed to the bottom |
 
-The last row is what made me conclude `DKS[0]` was the tap output: I set it to
-`Z` specifically to see `Z` come out, and `Z` came out on both a tap and a hold.
+### Why the earlier rows read wrong
 
-**That conclusion is now doubtful.** Reading the driver's own Mod-Tap template
-labels the two drop targets: the first is `messages.hold` and writes
-`DKS[0]`, the second is `messages.click` and writes `DKS[1]`. So by the
-vendor's own UI, `DKS[0]` is the *hold* output and `DKS[1]` is the *tap*
-output, which is the opposite of what the table above implies. Either the
-firmware ignores those labels, or something about how I wrote those earlier
-frames did not land as intended. Both readings fit the data so far and they
-disagree about which byte to call the tap, so the table above does not settle it.
+The table above looks like evidence that `DKS[0]` is the tap output and that
+`DKS[1]` is dead. It is not, and I drew the wrong conclusion from it.
+
+Reading the driver's own Mod-Tap template labels the two drop targets: the first
+is `messages.hold` and writes `DKS[0]`, the second is `messages.click` and writes
+`DKS[1]`. So the row `Z` / `Enter` was `hold = Z`, `tap = Enter` — and `Z` coming
+out on **both** a tap and a hold meant the hold branch won every time, not that
+`Z` was the tap output. I had set `Z` in the hold slot and then read the result as
+proof about the tap slot.
+
+Re-running it through the vendor's own UI with `hold = Z` and `tap = E` gave a
+short press of `E` and a long press of `Z`. Both slots work, and the driver is
+right about which is which:
+
+| slot | meaning | fires when |
+|---|---|---|
+| `hold_key` (`DKS[0]`) | output key on hold | press lasts longer than `delay` |
+| `tap_key` (`DKS[1]`) | output key on tap | press released before `delay` |
+
+Read back over our own protocol, the same assignment reported `hold 0x001d`,
+`tap 0x0008`, `200 ms`, so the frame and the semantics agree.
+
+The earlier "the advanced-key subsystem is broken" conclusion rested entirely on
+that one misread row. Snap Tap is still unexplained, but Mod-Tap is not a
+mystery: it works, it had simply never been configured with a known-good pair.
 
 ### The capture that produced a real non-zero frame
 
@@ -332,8 +358,8 @@ Decoded, and byte-identical to `protocol::mod_tap_packet`:
 |---|---|---|
 | `01` | write | write |
 | `17` | key | `T` |
-| `1d 00` | `modifier_a`, u16 LE | `29` = `Z`, the `hold` slot |
-| `08 00` | `modifier_b`, u16 LE | `8` = `E`, the `click` slot |
+| `1d 00` | `hold_key`, u16 LE | `29` = `Z`, the `hold` slot |
+| `08 00` | `tap_key`, u16 LE | `8` = `E`, the `click` slot |
 | `14` | delay | 20 tenths = 200 ms |
 
 So the layout is settled for real this time, with non-zero values rather than a
@@ -352,26 +378,29 @@ hand. Pressing `T` briefly should produce `E` and holding it `Z` if the labels
 are honest; observing which character actually appears is the test that decides
 this, and it is the one thing the driver cannot tell us.
 
-### Why this is worth stopping on
+### Why this was worth stopping on
 
 Two features, two different commands, two different packet layouts, one identical
-outcome. That points at the advanced-key subsystem as a whole rather than at two
-independent mistakes in my frames — the frames are transcribed directly from the
-driver and round-trip byte-for-byte.
+outcome. That looked like the advanced-key subsystem being broken as a whole
+rather than two independent mistakes in my frames — the frames are transcribed
+directly from the driver and round-trip byte-for-byte, so "my frame is wrong"
+was already off the table.
 
-The remaining unknowns are all *semantic*, and none of them are recoverable by
-reading the driver more carefully:
+That reasoning was sound and the conclusion drawn from it was not. Mod-Tap works;
+one row of one table had been read the wrong way round. A subsystem-level
+explanation was accepted when a simpler one was sitting in the same document.
 
-* For Snap Tap, what `mode` and `type` mean.
-* For Mod-Tap, what makes the hold branch fire, and whether `DKS[1]` is an output
-  at all rather than, say, a second key that has to be pressed alongside.
+Snap Tap has not been re-examined under that lens and still has no confirmed
+semantics. Its `mode` and `type` remain unknown, and unlike Mod-Tap it has never
+produced a single frame with non-zero fields, so it has never been tested with a
+pair that was known-good.
 
-### How to settle it
+### How to settle Snap Tap
 
-One approach serves both, and it is the same one already recommended for Snap
-Tap: **run the vendor's own WebHID driver against the board and record the
-packets.** Configure Mod-Tap and Snap Tap in the vendor's UI with a keyboard
-logger or a proxy in front of the HID endpoint, and the exact bytes plus the
+The approach that worked for Mod-Tap, unchanged: **run the vendor's own WebHID
+driver against the board and record the packets.** Configure Mod-Tap and Snap Tap
+in the vendor's UI with a keyboard logger or a proxy in front of the HID
+endpoint, and the exact bytes plus the
 observed behaviour appear side by side.
 
 Everything in this file's "verified" column was derived from that driver without

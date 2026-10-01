@@ -1,4 +1,4 @@
-﻿//! `aula-probe` — a dependency-light HID probing tool for Aula magnetic
+//! `aula-probe` — a dependency-light HID probing tool for Aula magnetic
 //! keyboards.
 //!
 //! It exists so that protocol research does not require building the GUI. It
@@ -118,7 +118,7 @@ fn print_help() {
                                           read (or write) a Snap Tap / Rapid Switch pair
   {BOLD}layout <id> [ids]{RESET}                  read one per-key register across the keymap
   {BOLD}grid{RESET}                              live sensor grid, raw rows/cols, no labels
-  {BOLD}modtap <key> [modA modB delayMs] --yes{RESET}
+  {BOLD}modtap <key> [hold tap delayMs] --yes{RESET}
                                           read (or write) a Mod-Tap assignment
   {BOLD}set <what> <args...> --yes{RESET}      guarded writes
 
@@ -263,47 +263,47 @@ fn cmd_state(link: &mut Link) -> ExitCode {
     }
 
     // Snap Tap reads are keyed by the first key of the pair: a read with keyA set
-// to the key you configured returns that pair, while keyA = 0 always reads
-// back empty. Sweep the physical keys so configured pairs are actually visible.
-{
-    let mut pairs: Vec<String> = Vec::new();
-    for key in keymap::KEYS {
-        let probe = p::pair_packet(
-            false,
-            p::cmd::SOCD,
-            p::KeyPair {
-                key_a: key.id as u8,
-                ..p::KeyPair::CLEARED
-            },
-        );
-        if let Some(r) = link.query(probe) {
-            if !r.matches(p::cmd::SOCD) || r.is_fail() {
-                continue;
+    // to the key you configured returns that pair, while keyA = 0 always reads
+    // back empty. Sweep the physical keys so configured pairs are actually visible.
+    {
+        let mut pairs: Vec<String> = Vec::new();
+        for key in keymap::KEYS {
+            let probe = p::pair_packet(
+                false,
+                p::cmd::SOCD,
+                p::KeyPair {
+                    key_a: key.id as u8,
+                    ..p::KeyPair::CLEARED
+                },
+            );
+            if let Some(r) = link.query(probe) {
+                if !r.matches(p::cmd::SOCD) || r.is_fail() {
+                    continue;
+                }
+                let Some(pair) = p::parse_pair(&r.0) else {
+                    continue;
+                };
+                if pair.is_cleared() {
+                    continue;
+                }
+                pairs.push(format!(
+                    "{}[{}]<->[{}] vA={} vB={} mode=0x{:02x} delay={}",
+                    key.label,
+                    pair.key_a,
+                    pair.key_b,
+                    pair.value_a,
+                    pair.value_b,
+                    pair.mode,
+                    pair.delay
+                ));
             }
-            let Some(pair) = p::parse_pair(&r.0) else {
-                continue;
-            };
-            if pair.is_cleared() {
-                continue;
-            }
-            pairs.push(format!(
-                "{}[{}]<->[{}] vA={} vB={} mode=0x{:02x} delay={}",
-                key.label,
-                pair.key_a,
-                pair.key_b,
-                pair.value_a,
-                pair.value_b,
-                pair.mode,
-                pair.delay
-            ));
+        }
+        if pairs.is_empty() {
+            println!("  snap tap        {DIM}no pairs configured{RESET}");
+        } else {
+            println!("  snap tap        {}", pairs.join("  "));
         }
     }
-    if pairs.is_empty() {
-        println!("  snap tap        {DIM}no pairs configured{RESET}");
-    } else {
-        println!("  snap tap        {}", pairs.join("  "));
-    }
-}
 
     let ids = keymap::all_ids();
     for (label, layout_id) in [
@@ -358,9 +358,7 @@ fn cmd_state(link: &mut Link) -> ExitCode {
         };
         let odd: Vec<String> = ids
             .iter()
-            .filter(|id| {
-                values.get(id).copied().filter(|v| *v != 0xFFFF) != *majority
-            })
+            .filter(|id| values.get(id).copied().filter(|v| *v != 0xFFFF) != *majority)
             .map(|id| {
                 let v = values.get(id).copied().unwrap_or(0xFFFF);
                 let label = keymap::KEYS
@@ -368,13 +366,22 @@ fn cmd_state(link: &mut Link) -> ExitCode {
                     .find(|k| k.id == *id)
                     .map(|k| k.label)
                     .unwrap_or("?");
-                let shown = if v == 0xFFFF { "no data" } else { &v.to_string() };
+                let shown = if v == 0xFFFF {
+                    "no data"
+                } else {
+                    &v.to_string()
+                };
                 format!("{label}[{id}]={shown}")
             })
             .collect();
         if !odd.is_empty() {
-            let base = majority.map(|v| v.to_string()).unwrap_or_else(|| "no data".into());
-            println!("               {DIM}differs from {base}: {}{RESET}", odd.join(" "));
+            let base = majority
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "no data".into());
+            println!(
+                "               {DIM}differs from {base}: {}{RESET}",
+                odd.join(" ")
+            );
         }
     }
 
@@ -557,7 +564,11 @@ fn cmd_layout(link: &mut Link, args: &[&str]) -> ExitCode {
     };
 
     let values = read_layout(link, layout, &ids);
-    println!("{BOLD}layout {layout}{RESET} {DIM}({}/{} keys answered){RESET}", values.len(), ids.len());
+    println!(
+        "{BOLD}layout {layout}{RESET} {DIM}({}/{} keys answered){RESET}",
+        values.len(),
+        ids.len()
+    );
 
     let mut distinct: Vec<(u16, usize)> = Vec::new();
     for id in &ids {
@@ -646,10 +657,18 @@ fn cmd_grid(link: &mut Link) -> ExitCode {
         .enumerate()
         .filter(|(_, v)| !v.is_nan() && **v > 0.05)
         .map(|(i, v)| {
-            let key = keymap::KEYS.iter().find(|k| k.row as usize * 21 + k.col as usize == i);
+            let key = keymap::KEYS
+                .iter()
+                .find(|k| k.row as usize * 21 + k.col as usize == i);
             match key {
                 // Show both claims so a mismatch is obvious.
-                Some(k) => format!("idx {i} (r{},c{}) = {} [app says {}]", i / 21, i % 21, v, k.label),
+                Some(k) => format!(
+                    "idx {i} (r{},c{}) = {} [app says {}]",
+                    i / 21,
+                    i % 21,
+                    v,
+                    k.label
+                ),
                 None => format!("idx {i} (r{},c{}) = {} [no key]", i / 21, i % 21, v),
             }
         })
@@ -667,25 +686,29 @@ fn cmd_grid(link: &mut Link) -> ExitCode {
 
 /// Mod-Tap (command 36), using the vendor driver's `MTPack` frame.
 ///
-/// Read-only unless `--yes` is given. `aula-probe modtap <key> [modA modB delayMs]`.
+/// The two output slots are `hold_key` and `tap_key`, in that order, which is
+/// the order the vendor's own drop targets write them.
+///
+/// Read-only unless `--yes` is given.
+/// `aula-probe modtap <key> [hold_hid tap_hid delay_ms] [--yes]`.
 fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
     let Some(key) = args.first().and_then(|v| v.parse::<u8>().ok()) else {
-        eprintln!("usage: aula-probe modtap <key> [modA_hid modB_hid delay_ms] [--yes]");
+        eprintln!("usage: aula-probe modtap <key> [hold_hid tap_hid delay_ms] [--yes]");
         return ExitCode::FAILURE;
     };
     let num = |i: usize| -> u16 { args.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
     let tap = p::ModTap {
         key,
-        modifier_a: num(1),
-        modifier_b: num(2),
+        hold_key: num(1),
+        tap_key: num(2),
         delay_tenths: (num(3) / 10).min(u8::MAX as u16) as u8,
     };
     let writing = confirmed && args.len() > 1;
     if writing {
         println!(
-            "{YELLOW}writing Mod-Tap: key=0x{key:02x} modA=0x{:04x} modB=0x{:04x} delay={}ms{RESET}",
-            tap.modifier_a,
-            tap.modifier_b,
+            "{YELLOW}writing Mod-Tap: key=0x{key:02x} hold=0x{:04x} tap=0x{:04x} delay={}ms{RESET}",
+            tap.hold_key,
+            tap.tap_key,
             tap.delay_ms()
         );
     }
@@ -709,10 +732,10 @@ fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
     match p::parse_mod_tap(&reply.0) {
         Some(got) => {
             println!("  key       0x{:02x}", got.key);
-            println!("  modifierA 0x{:04x}", got.modifier_a);
-            println!("  modifierB 0x{:04x}", got.modifier_b);
+            println!("  hold key  0x{:04x}", got.hold_key);
+            println!("  tap key   0x{:04x}", got.tap_key);
             println!("  delay     {} ms", got.delay_ms());
-            if !writing && got.key == 0 && got.modifier_a == 0 {
+            if !writing && got.key == 0 && got.hold_key == 0 {
                 println!("  {DIM}(nothing configured for this key){RESET}");
             }
         }
@@ -889,7 +912,11 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                     let (press_layout, release_layout) = match flag(args, "layout") {
                         Some(v) => match v.parse::<u8>() {
                             Ok(press_layout) => (press_layout, press_layout + 1),
-                            Err(_) => return usage("set deadzone <ids> <press_mm> <release_mm> [--layout N]"),
+                            Err(_) => {
+                                return usage(
+                                    "set deadzone <ids> <press_mm> <release_mm> [--layout N]",
+                                )
+                            }
                         },
                         None => (p::layout::DEAD_PRESS, p::layout::DEAD_RELEASE),
                     };

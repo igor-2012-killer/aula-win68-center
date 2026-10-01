@@ -306,16 +306,21 @@ pub fn parse_pair(reply: &[u8]) -> Option<KeyPair> {
     })
 }
 
-/// One Mod-Tap assignment: a key that emits `key` when tapped and the two
-/// modifier keys when held.
+/// One Mod-Tap assignment: a key that emits `tap_key` when tapped for less than
+/// `delay_ms`, and `hold_key` when held past it.
+///
+/// The field order is the vendor's, not a guess. Its driver labels the two drop
+/// targets `messages.hold` and `messages.click` and writes them to these two
+/// 16-bit slots in that order. Verified on the board: with `hold_key = Z` and
+/// `tap_key = E` on T, a short press produced `E` and a long press `Z`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ModTap {
     /// The key the Mod-Tap is assigned to. Also the read address.
     pub key: u8,
-    /// Modifier emitted on hold, first half.
-    pub modifier_a: u16,
-    /// Modifier emitted on hold, second half.
-    pub modifier_b: u16,
+    /// Emitted when held past the threshold. The driver's `messages.hold` slot.
+    pub hold_key: u16,
+    /// Emitted on a short press. The driver's `messages.click` slot.
+    pub tap_key: u16,
     /// Hold threshold in **10 ms units**, which is how the vendor driver sends
     /// it. [`ModTap::delay_ms`] converts for the UI.
     pub delay_tenths: u8,
@@ -354,8 +359,8 @@ pub fn mod_tap_packet(write: bool, tap: ModTap) -> [u8; PACKET_LEN] {
     let mut b = Builder::new(cmd::MOD_TAP);
     b.put(u8::from(write));
     b.put(tap.key);
-    b.put_u16(tap.modifier_a);
-    b.put_u16(tap.modifier_b);
+    b.put_u16(tap.hold_key);
+    b.put_u16(tap.tap_key);
     b.put(tap.delay_tenths);
     b.finish()
 }
@@ -367,8 +372,8 @@ pub fn parse_mod_tap(reply: &[u8]) -> Option<ModTap> {
     }
     Some(ModTap {
         key: reply[5],
-        modifier_a: u16::from_le_bytes([reply[6], reply[7]]),
-        modifier_b: u16::from_le_bytes([reply[8], reply[9]]),
+        hold_key: u16::from_le_bytes([reply[6], reply[7]]),
+        tap_key: u16::from_le_bytes([reply[8], reply[9]]),
         delay_tenths: reply[10],
     })
 }
@@ -809,8 +814,8 @@ mod tests {
         // branch, which is the one that applies to protocol 1.0.9.
         let tap = ModTap {
             key: 0x04,        // A
-            modifier_a: 0xE0, // left Ctrl
-            modifier_b: 0xE4, // left Alt
+            hold_key: 0xE0,   // left Ctrl
+            tap_key: 0xE4,    // left Alt
             delay_tenths: 20, // 200 ms, the driver's default
         };
         let p = mod_tap_packet(true, tap);
@@ -835,9 +840,9 @@ mod tests {
         // The 0xD0 checksum is the driver's own, so this pins header, command,
         // checksum and payload against the real thing.
         let tap = ModTap {
-            key: 0x17,      // T
-            modifier_a: 29, // Z
-            modifier_b: 8,  // E
+            key: 0x17,    // T
+            hold_key: 29, // Z, the driver's hold slot
+            tap_key: 8,   // E, the driver's click slot
             delay_tenths: 20,
         };
         let p = mod_tap_packet(true, tap);
@@ -848,8 +853,8 @@ mod tests {
 
         // The driver labels its two targets "hold" and "click", and writes them
         // to the first and second slot respectively.
-        assert_eq!(tap.modifier_a, 0x1D);
-        assert_eq!(tap.modifier_b, 0x08);
+        assert_eq!(tap.hold_key, 0x1D);
+        assert_eq!(tap.tap_key, 0x08);
     }
 
     #[test]
@@ -865,8 +870,8 @@ mod tests {
     fn mod_tap_round_trips_through_the_reply_layout() {
         let tap = ModTap {
             key: 0x04,
-            modifier_a: 0x1234,
-            modifier_b: 0x5678,
+            hold_key: 0x1234,
+            tap_key: 0x5678,
             delay_tenths: 25,
         };
         let p = mod_tap_packet(true, tap);
