@@ -304,13 +304,53 @@ Mod-Tap never emits its second value.
 | `0x17` T | `0x28` Enter | 20 ms | tap `t`, no newlines on hold |
 | `0x1D` Z | `0x28` Enter | 20 ms | **tap `Z`, hold `Z`**, even pressed to the bottom |
 
-The last row is the decisive one. `DKS[0]` is definitely the tap output — that
-was the point of setting it to `Z` and seeing `Z` come out. `DKS[1]` is never
-emitted, and neither holding for two seconds nor pushing the key to its travel
-limit brings it out.
+The last row is what made me conclude `DKS[0]` was the tap output: I set it to
+`Z` specifically to see `Z` come out, and `Z` came out on both a tap and a hold.
 
-So the tap half of Mod-Tap works and the hold half cannot be reached. Snap Tap
-fails the same way: the pair stores, and nothing switches.
+**That conclusion is now doubtful.** Reading the driver's own Mod-Tap template
+labels the two drop targets: the first is `messages.hold` and writes
+`DKS[0]`, the second is `messages.click` and writes `DKS[1]`. So by the
+vendor's own UI, `DKS[0]` is the *hold* output and `DKS[1]` is the *tap*
+output, which is the opposite of what the table above implies. Either the
+firmware ignores those labels, or something about how I wrote those earlier
+frames did not land as intended. Both readings fit the data so far and they
+disagree about which byte to call the tap, so the table above does not settle it.
+
+### The capture that produced a real non-zero frame
+
+The earlier frames were all built by us. The WebHID harness now fills the
+driver's own slots and presses the driver's own save button, so the frame comes
+from the vendor code path:
+
+* key `T`, `Z` dropped on the first target (`hold`), `E` on the second
+  (`click`), delay left at the driver's 200 ms default
+* transmitted: `5c 07 24 d0 01 17 1d 00 08 00 14`
+
+Decoded, and byte-identical to `protocol::mod_tap_packet`:
+
+| bytes | field | value |
+|---|---|---|
+| `01` | write | write |
+| `17` | key | `T` |
+| `1d 00` | `modifier_a`, u16 LE | `29` = `Z`, the `hold` slot |
+| `08 00` | `modifier_b`, u16 LE | `8` = `E`, the `click` slot |
+| `14` | delay | 20 tenths = 200 ms |
+
+So the layout is settled for real this time, with non-zero values rather than a
+frame of zeros, and the driver's `hold` slot is the first u16. Pinned as
+`matches_a_frame_captured_from_the_vendor_driver`.
+
+Filling the slots needed no UI automation: the `drop` handler ignores the event
+and reads `customKeyBuff`, so setting that store value and dispatching a
+synthetic `DragEvent` on `.MTBtn` drives the same code the pointer would. Note
+that the rendered slot text only updates on Vue's next tick, so reading it
+synchronously after the drop shows a stale empty slot.
+
+The keyboard is currently left with exactly that assignment on `T`
+(`hold = Z`, `click = E`, 200 ms), set through the vendor driver rather than by
+hand. Pressing `T` briefly should produce `E` and holding it `Z` if the labels
+are honest; observing which character actually appears is the test that decides
+this, and it is the one thing the driver cannot tell us.
 
 ### Why this is worth stopping on
 

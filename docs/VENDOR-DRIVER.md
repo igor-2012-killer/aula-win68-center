@@ -351,9 +351,31 @@ header len cmd ck | rw key DKS0:16 DKS1:16 delay
 
 This is byte-identical to `protocol::mod_tap_packet`, so the Rust builder is
 correct and the "the frame must be wrong" hypothesis is **eliminated** rather
-than merely unfalsified. What remains unknown is only what `DKS[0]` and
-`DKS[1]` *mean*: the capture showed the driver writing both as zero when no
-output keys had been chosen.
+than merely unfalsified.
+
+A second capture, this time with non-zero slots, pinned the payload for real.
+Dropping `Z` on the first target and `E` on the second for `T` and pressing the
+driver's own save button produced:
+
+```text
+5c 07 24 d0 | 01 17 1d 00 08 00 14
+header len cmd ck | rw key DKS0:16 DKS1:16 delay
+```
+
+The driver labels its two drop targets in the template, and the labels matter:
+
+| target | template label | writes |
+|---|---|---|
+| first | `messages.hold` | `DKS[0]`, `modifier_a` |
+| second | `messages.click` | `DKS[1]`, `modifier_b` |
+
+So by the vendor's own naming the first 16-bit value is the **hold** output and
+the second is the **click** (tap) output. The delay stayed at `0x14` because the
+UI default is 200 ms and the driver divides by 10.
+
+What remains unknown is whether the firmware honours those labels: pressing `T`
+has to be observed to tell whether a short press emits `DKS[1]` and a long press
+emits `DKS[0]`. See "Capture setup" below.
 
 ### Rapid Switch (45) — never send this
 

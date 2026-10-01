@@ -829,6 +829,30 @@ mod tests {
     }
 
     #[test]
+    fn matches_a_frame_captured_from_the_vendor_driver() {
+        // Captured rather than hand-assembled: in the vendor WebHID driver, drop
+        // Z on the first target and E on the second for key T, then press save.
+        // The 0xD0 checksum is the driver's own, so this pins header, command,
+        // checksum and payload against the real thing.
+        let tap = ModTap {
+            key: 0x17,      // T
+            modifier_a: 29, // Z
+            modifier_b: 8,  // E
+            delay_tenths: 20,
+        };
+        let p = mod_tap_packet(true, tap);
+        assert_eq!(
+            &p[..11],
+            &[0x5C, 0x07, 0x24, 0xD0, 0x01, 0x17, 0x1D, 0x00, 0x08, 0x00, 0x14]
+        );
+
+        // The driver labels its two targets "hold" and "click", and writes them
+        // to the first and second slot respectively.
+        assert_eq!(tap.modifier_a, 0x1D);
+        assert_eq!(tap.modifier_b, 0x08);
+    }
+
+    #[test]
     fn mod_tap_delay_converts_to_the_drivers_tenths() {
         assert_eq!(ModTap::from_delay_ms(200).delay_tenths, 20);
         assert_eq!(ModTap::from_delay_ms(200).delay_ms(), 200);
