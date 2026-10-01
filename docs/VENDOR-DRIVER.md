@@ -328,6 +328,33 @@ Three firmware behaviours that any UI must handle:
 Regression tests: `hardware_snap_tap_round_trips`, which writes, reads back,
 clears, and restores the modes it disturbed.
 
+### Mod-Tap (MT), command 36 — frame confirmed on the wire
+
+`MTPack` was transcribed from this bundle and then **verified against real
+traffic captured from the vendor's own driver** running in Chromium against the
+board. See "Capture setup" at the end of this document.
+
+Assigning Mod-Tap to `T` with a 30 ms hold threshold produced exactly one frame:
+
+```text
+5c 07 24 d0 | 01 17 00 00 00 00 00 | 14
+header len cmd ck | rw key DKS0:16 DKS1:16 delay
+```
+
+* `len = 7`, `cmd = 36` (`KB2_CMD_MT`)
+* byte 4 = `1` for write, `0` for read
+* byte 5 = the assigned key (`0x17` = T)
+* bytes 6..9 = two **16-bit** values, i.e. the `advancedKeyV2` branch, which
+  applies from protocol `1.0.3` and so is the right one at `1.0.9`
+* byte 10 = hold threshold in **10 ms units**; the UI held 30 ms and the driver
+  sent `0x14` = 20
+
+This is byte-identical to `protocol::mod_tap_packet`, so the Rust builder is
+correct and the "the frame must be wrong" hypothesis is **eliminated** rather
+than merely unfalsified. What remains unknown is only what `DKS[0]` and
+`DKS[1]` *mean*: the capture showed the driver writing both as zero when no
+output keys had been chosen.
+
 ### Rapid Switch (45) — never send this
 
 `RSPack` is defined identically to `SOCDPack`, and the UI has a page for it. On
@@ -481,3 +508,41 @@ unexplored.
   hardware tests in `src-tauri/src/device.rs` do this, and they also take a
   global lock so the Rust test harness cannot run them against the same physical
   device in parallel.
+
+---
+
+## 12. Capture setup
+
+The vendor driver is the authoritative specification, and it can be **observed**
+rather than inferred. This is the harness that confirmed the Mod-Tap frame:
+
+```sh
+npx --no-install agent-browser --session hidcap --headed \
+  --init-script hid-logger.js open https://magnet.aulastar.com
+```
+
+`hid-logger.js` wraps `HIDDevice.prototype.sendReport` and `receiveReport` and
+pushes every frame into `window.__hidlog` as hex. It is registered as an **init
+script**, so it runs before the page's own code and cannot miss the opening
+handshake. Frames are read back with `agent-browser eval`, and
+`window.__hidclear()` resets the buffer between experiments so a single UI action
+shows up as a single frame.
+
+The one step that cannot be automated is Chrome's WebHID permission prompt:
+`navigator.hid.requestDevice` must be answered by a human once per browser
+profile. Everything after that is scriptable — the "Connect" button, the
+Config List, the Custom Key key picker, the delay slider and Save are all
+reachable through `click`, `fill` and `eval`.
+
+What this settled: the Mod-Tap frame (section 6) is confirmed rather than merely
+transcribed.
+
+What it did not settle: the semantics of Snap Tap's `mode` and `type`, and of
+Mod-Tap's `DKS[0]` / `DKS[1]`. Both need the same harness with the corresponding
+UI dialog driven far enough to write non-zero values — the Mod-Tap dialog exposes
+its two output-key slots only after the assignment card exists, and the SOCD page
+needs its resolver mode chosen from a list whose size is not evident from the
+bundle.
+
+No packet logger or HID proxy is needed. Wrapping `sendReport` in the page is
+sufficient and far less invasive.
