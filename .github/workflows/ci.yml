@@ -37,6 +37,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Tauri's build script links against webkit2gtk and glib, and hidapi's
+      # needs libudev. Without these, `glib-sys` and `hidapi` both fail in their
+      # build scripts rather than in the code.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libudev-dev \
+            pkg-config
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -53,13 +68,20 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
       - name: Format check
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        # No `--all`: the crate is not a workspace root, and cargo now warns on it.
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
   probe:
     name: Protocol tool builds standalone
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The probe shares hid.rs with the app, so it needs the same libudev.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libudev-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -90,6 +112,12 @@ jobs:
 
       - run: npm ci
 
+      # Required, not optional: `tauri::generate_context!()` resolves
+      # `frontendDist` ("../dist") at compile time and panics if it is missing,
+      # which is why this job failed while the Linux ones passed.
+      - name: Build frontend
+        run: npm run build
+
       - name: Build release binary
         run: cargo build --manifest-path src-tauri/Cargo.toml --release --features custom-protocol
 
@@ -105,26 +133,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/configure-pages@v5
-
       # Catches broken relative links between README / docs / templates, which
       # is the most common way this repo rots.
+      #
+      # The inner loop is fed by process substitution rather than a pipe. Both
+      # forms were run locally against a deliberately broken link and both exited
+      # non-zero, so this is tidiness rather than a bug fix: bash may run the
+      # last stage of a pipeline in the current shell, and relying on that is not
+      # worth the subtlety. Rehearsed locally, including the failure case.
+      #
+      # The `actions/configure-pages` step that used to sit above this one was
+      # the actual cause of this job failing: it requires Pages to be enabled on
+      # the repository, and it is not. It had no bearing on link checking.
       - name: Check relative markdown links
         run: |
           set -euo pipefail
           fail=0
           while IFS= read -r file; do
             dir="$(dirname "$file")"
-            grep -oE '\]\(([^)#][^)]*)\)' "$file" \
-              | sed -E 's/^\]\((.*)\)$/\1/' \
-              | grep -vE '^(https?:|mailto:|#)' \
-              | while IFS= read -r link; do
-                  target="${link%%#*}"
-                  [ -z "$target" ] && continue
-                  if [ ! -e "$dir/$target" ]; then
-                    echo "::error file=$file::broken link -> $link"
-                    fail=1
-                  fi
-                done || fail=1
+            while IFS= read -r link; do
+              target="${link%%#*}"
+              [ -z "$target" ] && continue
+              if [ ! -e "$dir/$target" ]; then
+                echo "::error file=$file::broken link -> $link"
+                fail=1
+              fi
+            done < <(
+              grep -oE '\]\(([^)#][^)]*)\)' "$file" \
+                | sed -E 's/^\]\((.*)\)$/\1/' \
+                | grep -vE '^(https?:|mailto:|#)' || true
+            )
           done < <(find . -name '*.md' -not -path './node_modules/*' -not -path './.git/*')
+          if [ "$fail" -ne 0 ]; then
+            echo "Broken relative links found."
+          fi
           exit "$fail"
