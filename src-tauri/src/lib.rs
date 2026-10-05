@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use tauri::{Manager, State};
 
-use device::{Device, Job, KeyPatch};
-use state::{KeyboardState, Lighting, SnapTap, POLLING_RATES};
+use device::{Device, Job, KeyPatch, Reply};
+use state::{KeyboardState, Lighting, ModTapAssignment, SnapTap, POLLING_RATES};
 
 type Dev<'a> = State<'a, Arc<Device>>;
 
@@ -23,36 +23,52 @@ fn clamp_mm(value: f32, min: f32, max: f32) -> Result<f32, String> {
     Ok(value.clamp(min, max))
 }
 
+/// Runs a job on the I/O thread without blocking the main thread.
+///
+/// Tauri runs synchronous commands on the main thread, and a refresh against a
+/// degraded device can take seconds — enough to freeze the whole window. Every
+/// command that waits for the I/O thread therefore goes through
+/// `spawn_blocking`.
+async fn run_job(
+    device: Dev<'_>,
+    make: impl FnOnce(Reply) -> Job + Send + 'static,
+) -> Result<(), String> {
+    let device = device.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || device.request(make))
+        .await
+        .map_err(|err| format!("worker unavailable: {err}"))?
+}
+
 #[tauri::command]
 fn get_state(device: Dev) -> KeyboardState {
     device.state()
 }
 
 #[tauri::command]
-fn refresh(device: Dev) -> Result<(), String> {
-    device.request(Job::Refresh)
+async fn refresh(device: Dev<'_>) -> Result<(), String> {
+    run_job(device, Job::Refresh).await
 }
 
 #[tauri::command]
-fn reconnect(device: Dev) -> Result<(), String> {
-    device.request(Job::Reconnect)
+async fn reconnect(device: Dev<'_>) -> Result<(), String> {
+    run_job(device, Job::Reconnect).await
 }
 
 #[tauri::command]
-fn set_global_actuation(device: Dev, mm: f32) -> Result<(), String> {
+async fn set_global_actuation(device: Dev<'_>, mm: f32) -> Result<(), String> {
     let value = clamp_mm(mm, 0.1, 3.4)?;
-    device.request(|tx| Job::GlobalActuation(value, tx))
+    run_job(device, move |tx| Job::GlobalActuation(value, tx)).await
 }
 
 #[tauri::command]
-fn set_keys_actuation(device: Dev, key_ids: Vec<u16>, mm: f32) -> Result<(), String> {
+async fn set_keys_actuation(device: Dev<'_>, key_ids: Vec<u16>, mm: f32) -> Result<(), String> {
     let value = clamp_mm(mm, 0.1, 3.4)?;
-    apply(device, key_ids, KeyPatch::Actuation(value))
+    apply(device, key_ids, KeyPatch::Actuation(value)).await
 }
 
 #[tauri::command]
-fn set_keys_rapid_trigger(
-    device: Dev,
+async fn set_keys_rapid_trigger(
+    device: Dev<'_>,
     key_ids: Vec<u16>,
     on: bool,
     press_mm: f32,
@@ -65,23 +81,24 @@ fn set_keys_rapid_trigger(
         key_ids,
         KeyPatch::RapidTrigger { on, press, release },
     )
+    .await
 }
 
 #[tauri::command]
-fn set_keys_deadzone(
-    device: Dev,
+async fn set_keys_deadzone(
+    device: Dev<'_>,
     key_ids: Vec<u16>,
     press_mm: f32,
     release_mm: f32,
 ) -> Result<(), String> {
     let press = clamp_mm(press_mm, 0.0, 0.5)?;
     let release = clamp_mm(release_mm, 0.0, 0.5)?;
-    apply(device, key_ids, KeyPatch::Deadzone { press, release })
+    apply(device, key_ids, KeyPatch::Deadzone { press, release }).await
 }
 
 #[tauri::command]
-fn reset_keys(device: Dev, key_ids: Vec<u16>) -> Result<(), String> {
-    apply(device, key_ids, KeyPatch::Reset)
+async fn reset_keys(device: Dev<'_>, key_ids: Vec<u16>) -> Result<(), String> {
+    apply(device, key_ids, KeyPatch::Reset).await
 }
 
 /// Upper bound for the Snap Tap dynamic delay, in milliseconds.
@@ -106,7 +123,7 @@ const MAX_SNAP_TAP_DELAY_MS: u16 = 500;
 const SNAP_TAP_WRITES_ENABLED: bool = false;
 
 #[tauri::command]
-fn set_snap_tap(device: Dev, pair: SnapTap) -> Result<(), String> {
+async fn set_snap_tap(device: Dev<'_>, pair: SnapTap) -> Result<(), String> {
     if !SNAP_TAP_WRITES_ENABLED {
         return Err(
             "Snap Tap writes are disabled: the resolver's mode and type fields are not \
@@ -127,53 +144,108 @@ fn set_snap_tap(device: Dev, pair: SnapTap) -> Result<(), String> {
     if pair.delay_ms > MAX_SNAP_TAP_DELAY_MS {
         return Err(format!("delay must be 0..={MAX_SNAP_TAP_DELAY_MS} ms"));
     }
-    device.request(|tx| Job::SnapTap(Some(pair), tx))
+    run_job(device, move |tx| Job::SnapTap(Some(pair), tx)).await
 }
 
 /// Turns Snap Tap off and puts the pair's keys back the way they were.
 #[tauri::command]
-fn clear_snap_tap(device: Dev) -> Result<(), String> {
-    device.request(|tx| Job::SnapTap(None, tx))
+async fn clear_snap_tap(device: Dev<'_>) -> Result<(), String> {
+    run_job(device, move |tx| Job::SnapTap(None, tx)).await
+}
+
+/// Upper bound for the Mod-Tap hold threshold, in milliseconds.
+///
+/// The wire field is one byte in 10 ms units, so 2550 ms is the representable
+/// maximum. `MAX_DELAY_MS` in `src/components/tabs/ModTapTab.tsx` must match,
+/// otherwise the slider and the backend disagree.
+const MAX_MOD_TAP_DELAY_MS: u16 = 2550;
+
+/// Rejects key ids the keymap does not know.
+fn known_key(id: u16) -> Result<(), String> {
+    if keymap::KEYS.iter().any(|k| k.id == id) {
+        Ok(())
+    } else {
+        Err(format!("unknown key id {id}"))
+    }
+}
+
+/// Lists Mod-Tap assignments known to the cache.
+///
+/// Only keys seen in a refresh or scan appear here; the Mod-Tap tab can sweep
+/// the whole board with `scan_mod_tap`.
+#[tauri::command]
+fn list_mod_tap(device: Dev) -> Vec<ModTapAssignment> {
+    device.state().mod_tap
+}
+
+/// Sweeps keys for Mod-Tap assignments. An empty id list scans all 68 keys.
+#[tauri::command]
+async fn scan_mod_tap(device: Dev<'_>, key_ids: Vec<u16>) -> Result<(), String> {
+    run_job(device, move |tx| Job::ModTapScan(key_ids, tx)).await
+}
+
+/// Assigns Mod-Tap to one key: `hold_key` on a hold past `delay_ms`,
+/// `tap_key` on a short press. Both are HID usage ids; 0 means "no output".
+#[tauri::command]
+async fn set_mod_tap(device: Dev<'_>, assignment: ModTapAssignment) -> Result<(), String> {
+    known_key(assignment.key_id)?;
+    if assignment.hold_key == 0 && assignment.tap_key == 0 {
+        return Err(
+            "Mod-Tap needs at least one output key — use clear_mod_tap to remove it".into(),
+        );
+    }
+    if assignment.delay_ms > MAX_MOD_TAP_DELAY_MS {
+        return Err(format!("delay must be 0..={MAX_MOD_TAP_DELAY_MS} ms"));
+    }
+    run_job(device, move |tx| Job::ModTapWrite(assignment, tx)).await
+}
+
+/// Removes the Mod-Tap assignment from a key and clears its advanced-key flag,
+/// keeping the touch mode the key had.
+#[tauri::command]
+async fn clear_mod_tap(device: Dev<'_>, key_id: u16) -> Result<(), String> {
+    known_key(key_id)?;
+    run_job(device, move |tx| Job::ModTapClear(key_id, tx)).await
 }
 
 #[tauri::command]
-fn set_lighting(device: Dev, config: Lighting) -> Result<(), String> {
+async fn set_lighting(device: Dev<'_>, config: Lighting) -> Result<(), String> {
     let mut value = config;
     value.brightness = value.brightness.min(4);
     value.speed = value.speed.min(4);
     value.sleep_minutes = value.sleep_minutes.min(60);
     value.effect = value.effect.min(20);
-    device.request(|tx| Job::Lighting(value, tx))
+    run_job(device, move |tx| Job::Lighting(value, tx)).await
 }
 
 #[tauri::command]
-fn set_polling_rate(device: Dev, index: u8) -> Result<(), String> {
+async fn set_polling_rate(device: Dev<'_>, index: u8) -> Result<(), String> {
     if POLLING_RATES.iter().all(|(i, _)| *i != index) {
         return Err(format!("unknown polling rate index {index}"));
     }
-    device.request(|tx| Job::PollingRate(index, tx))
+    run_job(device, move |tx| Job::PollingRate(index, tx)).await
 }
 
 #[tauri::command]
-fn set_profile(device: Dev, index: u8) -> Result<(), String> {
+async fn set_profile(device: Dev<'_>, index: u8) -> Result<(), String> {
     if index > 3 {
         return Err("profile must be 0..=3".into());
     }
-    device.request(|tx| Job::Profile(index, tx))
+    run_job(device, move |tx| Job::Profile(index, tx)).await
 }
 
 #[tauri::command]
-fn set_os_mode(device: Dev, mac: bool) -> Result<(), String> {
-    device.request(|tx| Job::OsMode { mac, reply: tx })
+async fn set_os_mode(device: Dev<'_>, mac: bool) -> Result<(), String> {
+    run_job(device, move |tx| Job::OsMode { mac, reply: tx }).await
 }
 
 /// Ask the backend to start or stop the real-time sensor stream.
 #[tauri::command]
-fn set_streaming(device: Dev, on: bool) -> Result<(), String> {
-    device.request(|tx| Job::Streaming(on, tx))
+async fn set_streaming(device: Dev<'_>, on: bool) -> Result<(), String> {
+    run_job(device, move |tx| Job::Streaming(on, tx)).await
 }
 
-fn apply(device: Dev, key_ids: Vec<u16>, patch: KeyPatch) -> Result<(), String> {
+async fn apply(device: Dev<'_>, key_ids: Vec<u16>, patch: KeyPatch) -> Result<(), String> {
     let ids: Vec<u16> = key_ids
         .into_iter()
         .filter(|id| keymap::KEYS.iter().any(|k| k.id == *id))
@@ -181,11 +253,12 @@ fn apply(device: Dev, key_ids: Vec<u16>, patch: KeyPatch) -> Result<(), String> 
     if ids.is_empty() {
         return Err("no valid keys selected".into());
     }
-    device.request(|tx| Job::Keys {
+    run_job(device, move |tx| Job::Keys {
         ids,
         patch,
         reply: tx,
     })
+    .await
 }
 
 #[tauri::command]
@@ -214,6 +287,10 @@ pub fn run() {
             reset_keys,
             set_snap_tap,
             clear_snap_tap,
+            list_mod_tap,
+            scan_mod_tap,
+            set_mod_tap,
+            clear_mod_tap,
             set_lighting,
             set_polling_rate,
             set_profile,

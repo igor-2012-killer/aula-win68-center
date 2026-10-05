@@ -156,6 +156,31 @@ pub struct SavedKeyMode {
     pub mode: KeyMode,
 }
 
+/// A configured Mod-Tap assignment on one key.
+///
+/// The key emits `hold_key` when held past the threshold and `tap_key` on a
+/// short press. Both are HID usage ids, and the threshold comes from the
+/// firmware in 10 ms units. Semantics confirmed against the vendor driver and
+/// on the board — see `docs/VENDOR-DRIVER.md` §6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModTapAssignment {
+    /// The key the assignment lives on, by HID id. Also the read address.
+    pub key_id: u16,
+    /// Emitted on hold (the vendor's `messages.hold` slot).
+    pub hold_key: u16,
+    /// Emitted on a short press (the vendor's `messages.click` slot).
+    pub tap_key: u16,
+    /// Hold threshold in milliseconds.
+    pub delay_ms: u16,
+}
+
+impl ModTapAssignment {
+    /// True when the assignment stores nothing that can fire.
+    pub fn is_empty(&self) -> bool {
+        self.hold_key == 0 && self.tap_key == 0
+    }
+}
+
 /// Everything the UI needs in one payload.
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyboardState {
@@ -179,6 +204,9 @@ pub struct KeyboardState {
     pub lighting: Lighting,
     /// Configured Snap Tap pair, or `None` when Snap Tap is off.
     pub snap_tap: Option<SnapTap>,
+    /// Keys with a Mod-Tap assignment. Only keys known to the cache appear
+    /// here; the Mod-Tap tab can sweep the whole board to discover the rest.
+    pub mod_tap: Vec<ModTapAssignment>,
     /// Key modes to restore when the Snap Tap pair is cleared or changed.
     ///
     /// Internal bookkeeping, not part of the UI payload.
@@ -187,8 +215,6 @@ pub struct KeyboardState {
     pub keys: HashMap<u16, KeySettings>,
     pub layout: Vec<KeyDef>,
     pub presets: Vec<(&'static str, Vec<u16>)>,
-    /// Real-time travel in millimetres, keyed by sensor row * 21 + col.
-    pub sensors: Vec<f32>,
 }
 
 impl Default for KeyboardState {
@@ -215,10 +241,10 @@ impl Default for KeyboardState {
             lighting: Lighting::default(),
             snap_tap: None,
             snap_tap_saved_modes: Vec::new(),
+            mod_tap: Vec::new(),
             keys,
             layout: keymap::KEYS.to_vec(),
             presets: keymap::presets(),
-            sensors: vec![0.0; 21 * 6],
         }
     }
 }
