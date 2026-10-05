@@ -388,6 +388,31 @@ So Mod-Tap is fully understood:
 Note both are full HID usage ids, not modifier codes: `Z` and `E` are ordinary
 letters and both worked.
 
+### Resolver modes — labels recovered, encoding still to capture
+
+The vendor SOCD page offers a **four-entry mode list**, and the bundle carries
+translations for all four (`socdMode1..4`). This answers *what the modes mean*;
+the numeric encoding is still index-inferred rather than captured:
+
+| index (inferred) | vendor label (en) | meaning |
+|---|---|---|
+| 0 | `socdMode1` "Back cover" | **last pressed key wins** — the later press overrides the earlier one |
+| 1 | `socdMode2` "Keys in the red box take precedence" | **first key** of the pair wins |
+| 2 | `socdMode3` "Keys in the blue box take precedence" | **second key** of the pair wins |
+| 3 | `socdMode4` "Neutral" | **both held → neither fires** |
+
+The page also offers two binding kinds (`socdStr1` / `socdStr2`): binding by
+**position** ("two keys at specified positions of the keyboard are bound to each
+other") and by **key value** ("two key values bound to each other") — which
+explains why the page has both `DKS` (positions) and `DKSV` (key values) slots.
+
+The index encoding is *probably* the list index (0..3): `d` is initialised to
+the first label, `protocol::socd_mode::LAST_WON = 0` / `NEUTRAL = 3` agree with
+it, and mode `1` (first-key priority) was accepted and persisted in the
+round-trip test. But minification reuses names across components, so the
+authoritative mapping still needs one capture per mode through the vendor UI —
+the same harness that pinned Mod-Tap. A capture per mode also settles `type`.
+
 ### Rapid Switch (45) — never send this
 
 `RSPack` is defined identically to `SOCDPack`, and the UI has a page for it. On
@@ -508,10 +533,12 @@ unexplored.
    dynamic-delay frame round-trips, see §6.
 2. **Physically confirm Snap Tap behaviour.** The frames store and read back
    correctly, but nobody has yet watched a press actually switch from key A to
-   key B. The meaning of `mode`, `type` and the `value_a` / `value_b` fields in
-   milliseconds is still inferred from the UI, not measured.
-3. Determine what `mode` values `1`..`3` mean. The vendor UI has a four-entry
-   mode list, so the encoding is not yet mapped.
+   key B. The *labels* of the four resolver modes are now known (see §6); what
+   remains is one capture per mode through the vendor UI to pin the index
+   encoding and the `type` field, then a behavioural test.
+3. ~~Determine what `mode` values mean.~~ **Labels recovered** from the bundle:
+   last-pressed-wins / first-key priority / second-key priority / neutral. The
+   numeric encoding is index-inferred, not captured — see §6.
 4. Read `QUERY_PRECISION` fields 3-6 instead of assuming a travel range. The
    device reports `0xFFFF` for registers it has no data for, so the parser needs
    to treat that as "unknown" rather than a distance.

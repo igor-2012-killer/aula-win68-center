@@ -29,11 +29,12 @@ arbiter.
 | Per-key deadzones | layouts 22/23, not the 6/7 once believed |
 | Live sensor overlay | working, user-confirmed after an off-by-one fix |
 | OS layout, lighting, polling, hardware profiles | working |
-| **Mod-Tap** | **working, semantics confirmed** |
-| **Snap Tap** | stores correctly, does not switch. Writes disabled. |
+| **Mod-Tap** | **working, semantics confirmed, UI added** |
+| **Snap Tap** | stores correctly, does not switch. Writes disabled. Mode labels recovered from the vendor bundle; encoding still needs one capture. |
+| Config export/import, disconnect handling | added |
 | CI | 5/5 jobs green |
 
-Local gates, all currently passing: 36 unit tests (11 hardware tests are
+Local gates, all currently passing: 38 unit tests (11 hardware tests are
 `#[ignore]`d), clippy clean under `-D warnings` for both the app and the probe,
 `cargo fmt --check` clean, `npm run build` clean, markdown link check clean.
 
@@ -128,19 +129,23 @@ is the only major gap. Storage works and persists; nothing switches.
 What is known: command 44, `SOCDV4Pack`, 11-byte payload, read-back matches
 writes, no commit step, forces both keys to Single Mode. Writes are disabled in
 `src-tauri/src/lib.rs` behind `SNAP_TAP_WRITES_ENABLED = false`, and the UI is
-read-and-clear only.
+read-and-clear only. The vendor bundle's four resolver mode labels are now
+recovered — last-pressed-wins, first-key priority, second-key priority, neutral
+— see `docs/VENDOR-DRIVER.md` §6. The numeric encoding is index-inferred, not
+captured, and `type` is unexplained.
 
-What is not known: what `mode` and `type` mean. They have never had a non-zero
-value that produced a behaviour change.
+What is not known: which index maps to which behaviour, and what `type` means.
+They have never had a non-zero value that produced a behaviour change.
 
 The reason this has not gone further is that Snap Tap has never produced a frame
 with non-zero fields, so it has never been tested with a pair that was known
 good. The Mod-Tap lesson applies directly. The approach that worked there:
 
 1. Run the vendor driver under the WebHID logger.
-2. Fill the slots the vendor's own UI exposes, with distinct keys, and press its
-   own Save. The resulting frame is authoritative by construction.
-3. Read it back over our protocol and compare.
+2. Fill the slots the vendor's own UI exposes, with distinct keys, select each
+   resolver mode in turn, and press its own Save. The resulting frames are
+   authoritative by construction.
+3. Read them back over our protocol and compare.
 4. Only then test behaviour, and only with values whose meaning is known.
 
 Do not carry the Mod-Tap result over as an assumption that Snap Tap works
@@ -153,12 +158,13 @@ Answers `0xFF` as probed, but the vendor ships a UI page for it and
 `advancedKeyV2` is on for this firmware. Check the frame shape before declaring
 it dead. Same `MTPack`-style reconstruction applies.
 
-### 3. Mod-Tap UI
+### 3. Macros (commands 32/33) and per-key RGB (42)
 
-The protocol is done and tested; there is no UI for it. Deliberately held back
-until the semantics were confirmed, and they now are, so this is unblocked. Worth
-checking against the vendor's page for the slot order and the delay slider's
-range before writing it.
+Both feature gates (`macroV2`, `DynamicLightColor`) are enabled on this
+firmware, and both have vendor UI. Neither frame has been reconstructed. The
+vendor bundle defines `Layout_MacroAddr`/`Layout_MacroSize` (17/18), four macro
+repeat modes, and a full recorder page — the same WebHID harness that pinned
+Mod-Tap is the cheapest way to a frame.
 
 ## How to verify
 

@@ -181,9 +181,11 @@ does not re-derive them.
 1. ~~**Does any released firmware implement Snap Tap?**~~ **Yes, and it works.**
    Command `44`, payload length 11, byte 4 is read/write, values 16-bit, reads
    keyed by the first key. See [VENDOR-DRIVER.md §6](VENDOR-DRIVER.md) and
-   `hardware_snap_tap_round_trips`. *Still open:* what do `mode`, `type` and the
-   two resolver values mean physically, and has anyone watched a press actually
-   switch keys?
+   `hardware_snap_tap_round_trips`. *Still open:* the four resolver mode labels
+   are now recovered from the vendor bundle (last-pressed-wins / first-key
+   priority / second-key priority / neutral), but the numeric encoding is
+   index-inferred rather than captured, `type` is unexplained, and nobody has
+   yet watched a press actually switch keys.
 2. **Is there a profile "save/commit" command?** Every setting written so far
    appears to persist immediately. If profiles need an explicit commit, several
    write paths here might be subtly incomplete. Note the vendor enum's
@@ -472,6 +474,13 @@ Snap Tap in its UI, and capture what goes over the wire. That answers `mode`,
 `type` and the `DKSV` role in one pass, without guessing. A browser with a
 WebHID-capable Chromium and a user gesture for the permission prompt is enough;
 the driver's JavaScript is already in `docs/VENDOR-DRIVER.md`'s provenance notes.
+
+The mode *labels* are already recovered from the bundle — see
+[`VENDOR-DRIVER.md` §6](VENDOR-DRIVER.md#resolver-modes--labels-recovered-encoding-still-to-capture):
+`socdMode1..4` are last-pressed-wins, first-key priority, second-key priority
+and neutral. What the capture must add is the numeric encoding (one write per
+selected mode) and the `type` field. Once both are pinned, Snap Tap writes can
+ship with real semantics instead of guesses.
 
 Alternative: a firmware dump would show the handler for `cmd 44` outright.
 

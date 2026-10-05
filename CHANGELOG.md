@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* **Mod-Tap tab** — assign a hold output and a tap output to any key with a
+  hold threshold in 10 ms steps. The frame was already verified against the
+  vendor driver's own captured traffic; this adds the UI, a whole-board scan
+  for existing assignments, and a clear path that also resets the advanced-key
+  flag while keeping the key's touch mode.
+* **Configuration export/import** in the System tab: actuation, Rapid Trigger,
+  deadzones, lighting, polling rate, profile and OS layout travel to a JSON
+  file and back.
+* **Disconnect handling** — an offline banner with a working Reconnect button,
+  connection state driven by backend status events, and an honest boot screen
+  instead of an eternal "Connecting…".
+* Snap Tap resolver mode labels recovered from the vendor bundle
+  (last-pressed-wins / first-key priority / second-key priority / neutral);
+  documented in [VENDOR-DRIVER.md §6](docs/VENDOR-DRIVER.md).
+
+### Fixed
+
+* **The app handle was lost when the keyboard was absent at startup**, leaving
+  every event and every later reconnect blind until an app restart.
+* **Applying a deadzone silently rewrote the key's touch mode to Global on the
+  wire** while the UI kept saying Rapid Trigger. Deadzone patches no longer
+  touch the mode register.
+* **A short HID reply could abort the whole process** in release builds
+  (`panic = "abort"`); short reads are rejected instead.
+* **Commands reported success while the keyboard was absent.** Jobs refused
+  before the device opened now answer with an error, so the UI cannot show a
+  save that never reached the keyboard.
+* **Arrows preset missed ↑** — the keymap labelled it `▲`, so the preset carried
+  three of the four arrows.
+* **Sensor peak hold never decayed** — the decay interval was re-created ~60
+  times per second and never got to tick. Peaks now decay, have a reset button,
+  and stream frames are coalesced to one store update per animation frame.
+* **Every IPC call leaked an 8-second pending rejection** behind its timeout.
+* **Sliders kept showing a value the keyboard refused.** A failed commit now
+  rolls the draft back; commits are silent on success and loud on failure.
+* Two hardware tests wrote to Esc against their own documented rule and one
+  never restored the mode it overwrote; they now use the mid-board probe key
+  and restore what they change.
+* Tauri commands are async now — synchronous ones could block the main thread
+  for the full 6 s request timeout against a stalling device.
+* The English string table had a Russian "delay" label; effect and sleep-timer
+  names are localized; dead i18n keys removed.
+
 ## [2.0.0] — 2026-09-30
 
 Complete rewrite. The previous version could not communicate with the keyboard

@@ -35,9 +35,10 @@ matrix including what does **not** work.
 |---|---|
 | **Actuation** | Global actuation point bounded by the range the keyboard itself reports. Individual points for selected keys. Reset to global for the selection or for all 68 keys at once. Per-key press/release deadzones. |
 | **Rapid Trigger** | Enable RT on selected keys, tune press and release sensitivity separately, presets for Valorant / CS2 / Apex / ultra-fast. |
+| **Mod-Tap** | A hold output and a tap output on any key, hold threshold in 10 ms steps, whole-board scan for existing assignments. |
 | **Lighting** | 21 effects, brightness, speed, direction, sleep timer, Super Response, and a 7-colour palette with quick swatches and a full colour picker. |
 | **Sensors** | Live Hall-sensor stream: 68 gauges showing real-time stem travel with peak hold. |
-| **System** | Polling rate 500–8000 Hz with the latency for each step, 4 on-keyboard profiles, Windows/macOS layout switching, full device readout. |
+| **System** | Polling rate 500–8000 Hz with the latency for each step, 4 on-keyboard profiles, Windows/macOS layout switching, full device readout, and configuration export/import to a file. |
 
 Key selection is shared across every tab: click a key to select it,
 `Ctrl`/`Shift`+click to add to the selection, and the chips give you WASD, QWER,
@@ -80,13 +81,15 @@ control that can quietly disable your keys is worse than no control.
 
 Also believed to be **implementable**, pending measurement:
 
-* **Per-key deadzones** now write layouts **22/23** (`Layout_DP`/`Layout_DR`),
-  confirmed writable, instead of 6/7 which are `Layout_DB2`/`Layout_DB3` and ship
-  at 2.0/3.0 mm — above the actuation point, so they could make a key unusable.
-* **Mod-Tap (36) and Dynamic DKS (39)** — the vendor driver has UI for both and
-  the relevant feature gates are enabled on this firmware version.
+* **Dynamic DKS (39)** — the vendor driver has UI for it and the
+  `advancedKeyV2` gate is enabled on this firmware.
 * **Per-key RGB (42)** — the `DynamicLightColor` gate is enabled here, so the
   data we were discarding is probably real.
+
+Snap Tap's resolver **mode labels** are now recovered from the vendor bundle —
+last-pressed-wins, first-key priority, second-key priority, neutral — which
+removes most of the guesswork; one capture per mode through the vendor UI pins
+the encoding. See [`docs/VENDOR-DRIVER.md` §6](docs/VENDOR-DRIVER.md).
 
 ---
 
@@ -189,7 +192,7 @@ immediately whether you have something we need.**
 │   └── components/
 │       ├── Keyboard.tsx     interactive 68-key diagram
 │       ├── ui.tsx           Slider, Toggle, Segmented, Select, Button, Panel
-│       └── tabs/            Actuation, RapidTrigger, Lighting, Sensors, System
+│       └── tabs/            Actuation, RapidTrigger, SnapTap, ModTap, Lighting, Sensors, System
 ├── src-tauri/               Rust back end
 │   ├── tauri.conf.json
 │   └── src/
