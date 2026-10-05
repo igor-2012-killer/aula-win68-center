@@ -35,6 +35,7 @@ matrix including what does **not** work.
 |---|---|
 | **Actuation** | Global actuation point bounded by the range the keyboard itself reports. Individual points for selected keys. Reset to global for the selection or for all 68 keys at once. Per-key press/release deadzones. |
 | **Rapid Trigger** | Enable RT on selected keys, tune press and release sensitivity separately, presets for Valorant / CS2 / Apex / ultra-fast. |
+| **Snap Tap** | Bind two keys and pick the resolver: last-pressed-wins, first-key, second-key, or neutral. Semantics captured from the vendor's own driver, behaviour confirmed on the board. |
 | **Mod-Tap** | A hold output and a tap output on any key, hold threshold in 10 ms steps, whole-board scan for existing assignments. |
 | **Lighting** | 21 effects, brightness, speed, direction, sleep timer, Super Response, and a 7-colour palette with quick swatches and a full colour picker. |
 | **Sensors** | Live Hall-sensor stream: 68 gauges showing real-time stem travel with peak hold. |
@@ -65,19 +66,16 @@ Correctly **absent from the UI**:
   frame but persists nothing, and a write **corrupts the mode of five keys**.
   See [`docs/VENDOR-DRIVER.md` §6](docs/VENDOR-DRIVER.md).
 
-**Snap Tap (44): the pair stores, but it does not switch yet.** The frame was
-wrong for a long time — the old probe sent 8-bit values in a 6-byte payload and
-read with `key_a = 0`, which the firmware answers empty by design. With the
-correct 11-byte dynamic-delay frame the pair writes, reads back and persists, and
-clearing works. What is missing is behaviour: pressing the key does not switch
-outputs, because the resolver's `mode` and `type` fields are not understood.
-
-The tab is therefore **read and clear only**. Writing is refused in
-`src-tauri/src/lib.rs`, because two guessed configurations were tried on real
-hardware and one of them left two keys emitting a non-printable HID code. A
-control that can quietly disable your keys is worse than no control.
-[`docs/RESEARCH-NOTES.md`](docs/RESEARCH-NOTES.md) has the full account, and
-`docs/VENDOR-DRIVER.md` §6 the frame layout.
+**Snap Tap (44) works end to end** — and it took a capture session to prove it.
+The resolver mode travels in payload byte 8 (the parameter the vendor bundle
+names `type`), while byte 7 stays zero; every earlier attempt in this repo
+wrote the mode one byte to the left, which is why the pair stored but never
+switched. Two guessed configurations with non-zero resolver thresholds also
+made keys inert. The vendor's own frames — one Save per mode, plus its Delete
+button — were captured via the WebHID logger, pinned by unit tests, and the
+behaviour was confirmed on the board by pressing keys. See
+[`docs/RESEARCH-NOTES.md`](docs/RESEARCH-NOTES.md) and
+[`docs/VENDOR-DRIVER.md` §6](docs/VENDOR-DRIVER.md).
 
 Also believed to be **implementable**, pending measurement:
 
@@ -85,11 +83,7 @@ Also believed to be **implementable**, pending measurement:
   `advancedKeyV2` gate is enabled on this firmware.
 * **Per-key RGB (42)** — the `DynamicLightColor` gate is enabled here, so the
   data we were discarding is probably real.
-
-Snap Tap's resolver **mode labels** are now recovered from the vendor bundle —
-last-pressed-wins, first-key priority, second-key priority, neutral — which
-removes most of the guesswork; one capture per mode through the vendor UI pins
-the encoding. See [`docs/VENDOR-DRIVER.md` §6](docs/VENDOR-DRIVER.md).
+* **Macros (32/33)** — `macroV2` is on and the vendor ships a full recorder.
 
 ---
 

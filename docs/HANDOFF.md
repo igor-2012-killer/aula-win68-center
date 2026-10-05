@@ -30,7 +30,7 @@ arbiter.
 | Live sensor overlay | working, user-confirmed after an off-by-one fix |
 | OS layout, lighting, polling, hardware profiles | working |
 | **Mod-Tap** | **working, semantics confirmed, UI added** |
-| **Snap Tap** | stores correctly, does not switch. Writes disabled. Mode labels recovered from the vendor bundle; encoding still needs one capture. |
+| **Snap Tap** | **working end to end**: resolver modes captured from the vendor UI frame-for-frame, behaviour confirmed on the board, writes enabled |
 | Config export/import, disconnect handling | added |
 | CI | 5/5 jobs green |
 
@@ -65,10 +65,10 @@ reversible in the usual sense:
 * **Command 45 (Rapid Switch) corrupts the A, G, C, B and Fn modes.** It answers
   with a valid-looking structured frame rather than refusing, so it looks like it
   worked. Never send it.
-* Snap Tap and Mod-Tap writes do change real key behaviour. They store and clear
-  cleanly, but an unverified guess has already cost the user two dead keys once.
-  **No further advanced-key writes until the frame and both field values are
-  confirmed.**
+* Snap Tap and Mod-Tap writes change real key behaviour. Their frames are now
+  capture-confirmed and both features work; the same discipline applies to
+  anything new: **no advanced-key writes until the frame and every field value
+  are confirmed against the vendor driver.**
 
 Working rules, all established the hard way:
 
@@ -121,50 +121,33 @@ The one I/O thread owns the HID handle. Do not add a second reader.
 
 ## Next work, in priority order
 
-### 1. Snap Tap (the real open feature)
+### 1. Capture the remaining advanced-key frames (DKS 39, macros 32/33, per-key RGB 42)
 
-Snap Tap is the headline feature people expect from a magnetic keyboard, and it
-is the only major gap. Storage works and persists; nothing switches.
+Snap Tap and Mod-Tap are done — both were settled by the same method, and the
+remaining three advanced features use it too:
 
-What is known: command 44, `SOCDV4Pack`, 11-byte payload, read-back matches
-writes, no commit step, forces both keys to Single Mode. Writes are disabled in
-`src-tauri/src/lib.rs` behind `SNAP_TAP_WRITES_ENABLED = false`, and the UI is
-read-and-clear only. The vendor bundle's four resolver mode labels are now
-recovered — last-pressed-wins, first-key priority, second-key priority, neutral
-— see `docs/VENDOR-DRIVER.md` §6. The numeric encoding is index-inferred, not
-captured, and `type` is unexplained.
+* **Dynamic DKS (39)** — answers `0xFF` as probed, but the vendor ships a UI
+  page and `advancedKeyV2` is on for this firmware. Reconstruct the frame the
+  `MTPack` way before declaring it dead.
+* **Macros (32/33)** — `macroV2` is on; the vendor has a full recorder page,
+  four repeat modes, and `Layout_MacroAddr`/`Layout_MacroSize` (17/18).
+* **Per-key RGB (42)** — `DynamicLightColor` is on, so the repeating pattern
+  this repo reads is probably real data our parser misreads.
 
-What is not known: which index maps to which behaviour, and what `type` means.
-They have never had a non-zero value that produced a behaviour change.
+The harness in `tools/hid-capture` plus the vendor UI answers any of these in
+one session; the one manual step is Chrome's WebHID permission prompt.
 
-The reason this has not gone further is that Snap Tap has never produced a frame
-with non-zero fields, so it has never been tested with a pair that was known
-good. The Mod-Tap lesson applies directly. The approach that worked there:
+### 2. Tech debt
 
-1. Run the vendor driver under the WebHID logger.
-2. Fill the slots the vendor's own UI exposes, with distinct keys, select each
-   resolver mode in turn, and press its own Save. The resulting frames are
-   authoritative by construction.
-3. Read them back over our protocol and compare.
-4. Only then test behaviour, and only with values whose meaning is known.
+Split `device.rs` (~2000 lines) into `snap_tap`/`jobs`/`worker` along existing
+seams, share the duplicated `read_layout`/µm-conversion/grid helpers between
+the app and the probe, and give `hid.rs` a `Transport` trait so the
+stale-reply state machine can be tested without hardware.
 
-Do not carry the Mod-Tap result over as an assumption that Snap Tap works
-similarly. They are different commands with different layouts, and the parallel
-is exactly the reasoning that produced the Mod-Tap error.
+### 3. Later
 
-### 2. Dynamic DKS (command 39)
-
-Answers `0xFF` as probed, but the vendor ships a UI page for it and
-`advancedKeyV2` is on for this firmware. Check the frame shape before declaring
-it dead. Same `MTPack`-style reconstruction applies.
-
-### 3. Macros (commands 32/33) and per-key RGB (42)
-
-Both feature gates (`macroV2`, `DynamicLightColor`) are enabled on this
-firmware, and both have vendor UI. Neither frame has been reconstructed. The
-vendor bundle defines `Layout_MacroAddr`/`Layout_MacroSize` (17/18), four macro
-repeat modes, and a full recorder page — the same WebHID harness that pinned
-Mod-Tap is the cheapest way to a frame.
+Firmware-version check (compare only — never send bootloader commands), sensor
+monitor pause/freeze, sibling-model USB IDs, Linux/macOS packaging.
 
 ## How to verify
 

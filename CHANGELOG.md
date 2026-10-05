@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Snap Tap, working end to end.** One Save per resolver mode was captured
+  frame-for-frame from the vendor's own WebHID driver, which settled a
+  long-standing mystery: the resolver mode travels in payload byte 8 (the
+  bundle's `type` parameter), while byte 7 stays zero — earlier attempts wrote
+  it one byte to the left, which is why pairs stored but never switched. The
+  vendor's frames also carry zero resolver thresholds, the fields whose
+  guessed values once made keys inert; the backend now forces them to zero.
+  Behaviour was confirmed on the board (neutral and last-pressed-wins), the
+  Delete button's frames matched this repo's clear path, and the Snap Tap tab
+  is a real editor: pair from the key selection, four named resolver modes,
+  optional delay, disable.
 * **Mod-Tap tab** — assign a hold output and a tap output to any key with a
   hold threshold in 10 ms steps. The frame was already verified against the
   vendor driver's own captured traffic; this adds the UI, a whole-board scan
@@ -20,9 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **Disconnect handling** — an offline banner with a working Reconnect button,
   connection state driven by backend status events, and an honest boot screen
   instead of an eternal "Connecting…".
-* Snap Tap resolver mode labels recovered from the vendor bundle
-  (last-pressed-wins / first-key priority / second-key priority / neutral);
-  documented in [VENDOR-DRIVER.md §6](docs/VENDOR-DRIVER.md).
 
 ### Fixed
 

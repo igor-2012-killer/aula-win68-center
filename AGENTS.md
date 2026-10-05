@@ -52,10 +52,10 @@ Writes change a real keyboard the user is holding. Non-negotiable:
 * **Never send commands 12/13** (bootloader `BL_WRITE`/`BL_READ`) or
   **command 45** (Rapid Switch — silently corrupts five key modes while
   answering with a valid-looking frame).
-* Advanced-key writes (Snap Tap, Mod-Tap, DKS) stay gated until the frame and
-  every field value are confirmed. Snap Tap writes are disabled in `lib.rs`
-  (`SNAP_TAP_WRITES_ENABLED = false`); an unverified guess already left the
-  user with two dead keys once.
+* Advanced-key writes stay gated until the frame and every field value are
+  confirmed against the vendor driver. Snap Tap and Mod-Tap are confirmed and
+  ship enabled (`SNAP_TAP_WRITES_ENABLED` in `lib.rs` remains as a kill
+  switch); an unverified guess already left the user with two dead keys once.
 * Snapshot with `aula-probe state` before and after touching hardware.
 * Hardware tests probe with key `T` (0x17), never Esc, and are serialised by a
   mutex in the test module — do not remove the mutex.

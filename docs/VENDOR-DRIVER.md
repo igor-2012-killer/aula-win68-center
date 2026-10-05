@@ -388,30 +388,48 @@ So Mod-Tap is fully understood:
 Note both are full HID usage ids, not modifier codes: `Z` and `E` are ordinary
 letters and both worked.
 
-### Resolver modes — labels recovered, encoding still to capture
+### Resolver modes — captured frame-for-frame and confirmed on the board
 
-The vendor SOCD page offers a **four-entry mode list**, and the bundle carries
-translations for all four (`socdMode1..4`). This answers *what the modes mean*;
-the numeric encoding is still index-inferred rather than captured:
+Captured 2026-10-05: pair A(0x04)/D(0x07) configured in the vendor's own UI,
+one Save per resolver mode, every frame read off the wire via the WebHID
+logger. The four mode frames differ in **exactly one byte** — and it is **not**
+the byte the bundle's parameter names suggest:
 
-| index (inferred) | vendor label (en) | meaning |
+| payload byte 8 (frame offset 12) | vendor label | meaning |
 |---|---|---|
-| 0 | `socdMode1` "Back cover" | **last pressed key wins** — the later press overrides the earlier one |
-| 1 | `socdMode2` "Keys in the red box take precedence" | **first key** of the pair wins |
-| 2 | `socdMode3` "Keys in the blue box take precedence" | **second key** of the pair wins |
-| 3 | `socdMode4` "Neutral" | **both held → neither fires** |
+| `0x00` | `socdMode1` "Back cover" | **last key pressed wins** |
+| `0x01` | `socdMode2` "Keys in the red box take precedence" | **first key** of the pair wins |
+| `0x02` | `socdMode3` "Keys in the blue box take precedence" | **second key** of the pair wins |
+| `0x03` | `socdMode4` "Neutral" | **both held → neither fires** |
+
+Full frame for mode 1: `5c 0b 2c c8 01 04 07 00 00 00 00 00 01 00 00` —
+checksum `0xC8` for every mode (it only folds in the last payload byte, the
+delay's low byte).
+
+Three findings that rewrite the earlier reading:
+
+1. **The resolver mode travels in payload byte 8** — the bundle's `type`
+   parameter — not byte 7 (`mode`), which stayed 0 in every capture. This is
+   why this repo's old hardware test ("mode 1 stored, no effect") saw nothing:
+   it wrote the mode into byte 7 and the firmware reads byte 8. The 7th/8th
+   parameter names in `SOCDV4Pack` are swapped relative to their actual
+   function; `KeyPair::resolver` documents this.
+2. **The resolver thresholds (`DKSV`) are zero in the working flow**, and so
+   are `mode` (byte 7) and the delay. Two earlier guessed configurations with
+   non-zero DKSV made keys inert — junk thresholds silenced the resolver.
+3. **Delete** = the zeroed pair (same `key_b`, all fields 0) followed by
+   resetting the mode registers of both keys. Verified by reading the pair
+   address back afterwards: the record is gone entirely, not merely inert.
 
 The page also offers two binding kinds (`socdStr1` / `socdStr2`): binding by
-**position** ("two keys at specified positions of the keyboard are bound to each
-other") and by **key value** ("two key values bound to each other") — which
-explains why the page has both `DKS` (positions) and `DKSV` (key values) slots.
+**position** ("two keys at specified positions of the keyboard are bound to
+each other") and by **key value** ("two key values bound to each other"). The
+position-binding flow is what the captures above used; it leaves the DKSV
+slots zero.
 
-The index encoding is *probably* the list index (0..3): `d` is initialised to
-the first label, `protocol::socd_mode::LAST_WON = 0` / `NEUTRAL = 3` agree with
-it, and mode `1` (first-key priority) was accepted and persisted in the
-round-trip test. But minification reuses names across components, so the
-authoritative mapping still needs one capture per mode through the vendor UI —
-the same harness that pinned Mod-Tap. A capture per mode also settles `type`.
+**Behaviour confirmed on the board** by pressing keys with the vendor-written
+configuration: neutral silences both keys while held, and last-pressed-wins
+switches the output to the later key and back on release.
 
 ### Rapid Switch (45) — never send this
 
@@ -531,14 +549,15 @@ unexplored.
 
 1. ~~Re-read `44` and `45` and confirm the reply.~~ **Done** for `44`: the
    dynamic-delay frame round-trips, see §6.
-2. **Physically confirm Snap Tap behaviour.** The frames store and read back
-   correctly, but nobody has yet watched a press actually switch from key A to
-   key B. The *labels* of the four resolver modes are now known (see §6); what
-   remains is one capture per mode through the vendor UI to pin the index
-   encoding and the `type` field, then a behavioural test.
-3. ~~Determine what `mode` values mean.~~ **Labels recovered** from the bundle:
-   last-pressed-wins / first-key priority / second-key priority / neutral. The
-   numeric encoding is index-inferred, not captured — see §6.
+2. ~~**Physically confirm Snap Tap behaviour.**~~ **Done** 2026-10-05: one
+   capture per resolver mode through the vendor UI, then behaviour confirmed
+   on the board (neutral silences both; last-pressed-wins switches). The
+   frames and the delete sequence are pinned by unit tests and the hardware
+   suite. Remaining: modes 1/2 (single-key priority) are captured but were
+   not behaviour-tested individually.
+3. ~~Determine what `mode` values mean.~~ **Done** — and the answer came with
+   a twist: the resolver mode travels in payload **byte 8** (the bundle's
+   `type` parameter), while byte 7 stays 0 in every capture. See §6.
 4. Read `QUERY_PRECISION` fields 3-6 instead of assuming a travel range. The
    device reports `0xFFFF` for registers it has no data for, so the parser needs
    to treat that as "unknown" rather than a distance.

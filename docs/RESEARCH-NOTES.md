@@ -31,7 +31,7 @@ Verified by write → read-back on real hardware, and pinned by the tests in
 | Per-key mode | 35 / layout 8 | touch mode in the **high** nibble |
 | Rapid trigger | 35 / layouts 20, 21, 8 | |
 | Per-key deadzones | 35 / layouts **22, 23** — *pending verification* | previously believed to be 6, 7; the vendor names 22/23 `Layout_DP`/`Layout_DR` |
-| **Snap Tap** | **44, dynamic-delay frame** | **works** — writable, persistent, no commit step; forces both keys to Single Mode |
+| **Snap Tap** | **44, dynamic-delay frame** | **works end to end** — writable, persistent, resolver behaviour confirmed on the board; mode travels in payload byte 8; forces both keys to mode register 0x08 |
 | **Mod-Tap** | **36, `MTPack`** | **works** — 7-byte frame; first u16 is the hold key, second is the tap key, delay is the threshold in 10 ms units |
 | Lighting | 24 | 43-byte payload, BGR colours |
 | Polling rate | 80 | re-enumerates USB |
@@ -50,7 +50,7 @@ These are **not** bugs in this app. The firmware does not implement them.
 This is the important one, because Snap Tap is the headline feature people expect
 from a magnetic keyboard.
 
-**Snap Tap is implemented, writable and persistent on this keyboard.** The
+**Snap Tap is implemented, writable, persistent — and the resolver works** (confirmed by pressing keys, 2026-10-05).** The
 earlier conclusion that it was read-only was caused by three separate mistakes in
 the probe, all now fixed:
 
@@ -178,14 +178,13 @@ Most of these were open when this file was written and have since been answered
 from the vendor's driver JavaScript. Answers are given inline so the next person
 does not re-derive them.
 
-1. ~~**Does any released firmware implement Snap Tap?**~~ **Yes, and it works.**
+1. ~~**Does any released firmware implement Snap Tap?**~~ **Yes — fully working.**
    Command `44`, payload length 11, byte 4 is read/write, values 16-bit, reads
-   keyed by the first key. See [VENDOR-DRIVER.md §6](VENDOR-DRIVER.md) and
-   `hardware_snap_tap_round_trips`. *Still open:* the four resolver mode labels
-   are now recovered from the vendor bundle (last-pressed-wins / first-key
-   priority / second-key priority / neutral), but the numeric encoding is
-   index-inferred rather than captured, `type` is unexplained, and nobody has
-   yet watched a press actually switch keys.
+   keyed by the first key. The resolver mode travels in **payload byte 8** (the
+   bundle calls it `type`); the vendor frames carry zero thresholds and zero
+   delay. One Save per mode was captured from the vendor UI and the behaviour
+   was confirmed on the board. See [VENDOR-DRIVER.md §6](VENDOR-DRIVER.md),
+   `hardware_snap_tap_round_trips` and the captured-frame unit tests.
 2. **Is there a profile "save/commit" command?** Every setting written so far
    appears to persist immediately. If profiles need an explicit commit, several
    write paths here might be subtly incomplete. Note the vendor enum's
@@ -269,15 +268,13 @@ also what Esc legitimately reports for its rapid-trigger registers.
 
 ---
 
-## Advanced keys: Mod-Tap works, Snap Tap storage works but behaviour does not
+## Advanced keys: Mod-Tap and Snap Tap both work
 
 This section originally read "storage works, behaviour does not" for both
-features, on the strength of the table further down. Mod-Tap turned out to work
-fine; the table had been misread. The corrected reading is below.
-
-Snap Tap and Mod-Tap are both stored correctly and neither can be made to
-behave. They fail the same way and probably for the same reason, so they are
-written up together.
+features. Both conclusions were wrong, and for different reasons: Mod-Tap had
+been configured with the two output slots swapped in the analysis, and Snap Tap
+had its resolver mode written one byte to the left. Both features work when
+given frames that match the vendor driver byte for byte.
 
 Both live in the firmware's "advanced key" subsystem. The vendor driver keys them
 by type, and a key's `layout 8` low nibble selects which one applies — the
@@ -341,8 +338,9 @@ Read back over our own protocol, the same assignment reported `hold 0x001d`,
 `tap 0x0008`, `200 ms`, so the frame and the semantics agree.
 
 The earlier "the advanced-key subsystem is broken" conclusion rested entirely on
-that one misread row. Snap Tap is still unexplained, but Mod-Tap is not a
-mystery: it works, it had simply never been configured with a known-good pair.
+that one misread row. Snap Tap resisted longer — its mode byte sits one slot
+away from where everyone assumed — but it works too, and it had also simply
+never been configured with a known-good pair.
 
 ### The capture that produced a real non-zero frame
 
@@ -392,10 +390,10 @@ That reasoning was sound and the conclusion drawn from it was not. Mod-Tap works
 one row of one table had been read the wrong way round. A subsystem-level
 explanation was accepted when a simpler one was sitting in the same document.
 
-Snap Tap has not been re-examined under that lens and still has no confirmed
-semantics. Its `mode` and `type` remain unknown, and unlike Mod-Tap it has never
-produced a single frame with non-zero fields, so it has never been tested with a
-pair that was known-good.
+Snap Tap resisted that lens until 2026-10-05, when the per-mode capture session
+finally produced the known-good frames — and the answer was humbling: the
+resolver mode had been written one byte to the left the whole time. The
+subsystem was never broken; see "Snap Tap in detail" below.
 
 ### How to settle Snap Tap
 
@@ -409,80 +407,82 @@ Everything in this file's "verified" column was derived from that driver without
 needing this step; everything in the "not" column needs it. Guessing further has
 already cost two dead-key incidents and produced nothing.
 
-The protocol code stays in the tree either way: `protocol::mod_tap_packet`,
-`parse_mod_tap`, `ModTap`, and `aula-probe modtap` are correct and are exactly
-what the capture step needs. No UI is exposed, for the same reason as Snap Tap.
+Both features now have UI: the Mod-Tap tab ships the hold/tap editor, and the
+Snap Tap tab ships the resolver-mode editor with the captured semantics.
 
 ---
 
 ## Snap Tap in detail
 
-The frame layout and the failure history. See the section above for how Snap Tap
-relates to Mod-Tap and why both stopped here.
-
-The pair **writes, reads back and persists**. It does not switch anything, and
-the reason is not known. Recording this in full because two wrong guesses cost
-the user a pair of dead keys.
+The frame layout and the failure history — **resolved on 2026-10-05**, when a
+capture session through the vendor's own driver produced one Save frame per
+resolver mode and the board confirmed the behaviour by pressing keys. The
+history is kept because two wrong guesses cost the user a pair of dead keys,
+and because the root cause is a lesson worth keeping.
 
 ### What is verified
 
 * The 11-byte dynamic-delay frame (`cmd 44`) round-trips on real hardware.
 * The firmware stores the pair: a read addressed at the first key returns it.
-* Writing a pair switches both keys to Single Mode (layout 8 = `0x08`), and
-  clearing puts their modes back.
-* Clearing works from both `aula-probe` and the app, so a bad pair is always
-  recoverable.
+* Writing a pair sets both keys' mode registers to `0x08` (the advanced-key
+  type lands in the low nibble of `layout::MODE`), and clearing puts their
+  modes back.
+* Clearing — the zeroed-pair write followed by the two mode-register resets,
+  exactly what the vendor's Delete button sends — **removes the record**:
+  verified by reading the pair address back afterwards, which answers all
+  zeros.
+* **The resolver works.** With the vendor-captured frames on the board:
+  neutral silences both keys while both are held, and last-pressed-wins
+  switches the output to the later key and back on release. Confirmed by
+  pressing keys, 2026-10-05.
 
-### What is not
+### The root cause of "stored but no effect"
 
-Pressing the key does not switch between the two outputs. Two configurations were
-tried on real hardware:
+The resolver mode travels in **payload byte 8** (frame offset 12) — the
+parameter the vendor bundle names `type` — while payload byte 7 (bundle's
+`mode`) stays 0 in every captured frame. Every earlier write in this repo put
+the resolver mode into byte 7 and left byte 8 at 0, so the firmware stored a
+pair whose resolver was effectively unset:
 
-| `DKS` | `DKSV` | `mode` | `type` | `delay` | Result |
+| `DKS` | `DKSV` | byte 7 | byte 8 | `delay` | Result |
 |---|---|---|---|---|---|
 | `[4, 7]` | `[2, 2]` | 1 | 0 | 150 ms | **keys went silent** |
 | `[4, 7]` | `[4, 7]` | 1 | 0 | 150 ms | stored, no effect; keys typed normally |
+| vendor capture | `[0, 0]` | 0 | 1..3 | 0 | **works** |
 
-In the first case the keys stopped emitting anything. `DKSV` is rendered by the
-vendor UI through `Keyboard_Text[DKSV[w]]` — a table of *key names* — so
-`DKSV` holds HID ids, not thresholds. I had presented them in the app as numeric
-"threshold" sliders and defaulted them to `2`, which is not a printable key, so
-the keys dutifully emitted a code that types nothing.
+The first row's silent keys remain partly unexplained (junk in the resolver
+thresholds is the best theory), but the second row's "no effect" is fully
+explained by the byte swap. The vendor's working frames also carry zero
+thresholds and zero delay — non-zero DKSV guesses were part of the problem,
+not the solution.
 
-Correcting that to `DKSV = [4, 7]` produced no behaviour change, which means the
-remaining unknowns are `mode` and `type`. `mode` indexes a list the bundle
-defines elsewhere; the only `mode1..mode4` strings found near these structures
-belong to **macros**, so the Snap Tap mode list was not located.
+### Why the app refused to write (and no longer does)
 
-### Why the app refuses to write
-
-`SNAP_TAP_WRITES_ENABLED` in `src-tauri/src/lib.rs` is `false`, and
-`CAN_ENABLE_SNAP_TAP` in `SnapTapTab.tsx` mirrors it. Reading and clearing stay
-available, because clearing is the recovery path for anyone who wrote a pair
-with an intermediate build.
+`SNAP_TAP_WRITES_ENABLED` in `src-tauri/src/lib.rs` was `false` while the
+semantics were unknown, and the backend now forces the thresholds to zero
+regardless of what a client sends. The gate is kept as a kill switch.
 
 A control that stores a plausible-looking configuration which silently does
 nothing, or which bricks two keys, is worse than no control. The values needed
-to make it work are guesses, and the cost of a wrong guess is the user's
+to make it work were guesses, and the cost of a wrong guess is the user's
 keyboard.
 
-### How to settle it
+### How it was settled
 
-Run the **vendor's own driver** against the keyboard and read the packets it
-sends. `https://magnet.aulastar.com` is a WebHID page; connect the board, set up
-Snap Tap in its UI, and capture what goes over the wire. That answers `mode`,
-`type` and the `DKSV` role in one pass, without guessing. A browser with a
-WebHID-capable Chromium and a user gesture for the permission prompt is enough;
-the driver's JavaScript is already in `docs/VENDOR-DRIVER.md`'s provenance notes.
+Exactly the way this section used to propose: the **vendor's own WebHID
+driver** was run against the board with the [`tools/hid-capture`](../tools/hid-capture)
+logger installed as an init script, a pair (A/D) was configured in the
+vendor's UI, and one Save per resolver mode was captured. Four frames later
+the encoding was pinned — with the surprise that the mode travels in payload
+byte 8, not byte 7 — and pressing keys on the board confirmed the behaviour
+for neutral and last-pressed-wins. The Delete button's frames were captured
+the same way and matched this repo's clear path, with the addition of the two
+mode-register resets that actually remove the record.
 
-The mode *labels* are already recovered from the bundle — see
-[`VENDOR-DRIVER.md` §6](VENDOR-DRIVER.md#resolver-modes--labels-recovered-encoding-still-to-capture):
-`socdMode1..4` are last-pressed-wins, first-key priority, second-key priority
-and neutral. What the capture must add is the numeric encoding (one write per
-selected mode) and the `type` field. Once both are pinned, Snap Tap writes can
-ship with real semantics instead of guesses.
-
-Alternative: a firmware dump would show the handler for `cmd 44` outright.
+One automation note for anyone repeating this: the vendor's SOCD dialog
+floats over the keyboard diagram, and its key sources are the `.draggable`
+buttons *inside the dialog* — CDP-level drag-and-drop onto the
+`.SOCDRedBtn` / `.SOCDBtn` targets drives the same code a pointer would.
 
 ---
 
