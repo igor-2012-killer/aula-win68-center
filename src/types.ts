@@ -15,12 +15,17 @@ export interface KeySettings {
 }
 
 export interface SnapTap {
+  /** HID id of the first key of the pair; also the read address. */
   key_a: number;
+  /** HID id of the second key of the pair. */
   key_b: number;
-  value_a: number;
-  value_b: number;
+  /**
+   * Resolver mode: 0 = last key pressed wins ("Back cover"), 1 = the first
+   * key wins, 2 = the second key wins, 3 = neutral (both held → neither).
+   * Confirmed by capture from the vendor driver and on the board.
+   */
   mode: number;
-  key_type: number;
+  /** Dynamic delay in milliseconds; the vendor's own UI sends 0. */
   delay_ms: number;
 }
 

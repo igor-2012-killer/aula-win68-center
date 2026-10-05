@@ -17,21 +17,20 @@ interface Strings {
 
   snapTapTitle: string;
   snapTapHint: string;
-  snapTapOff: string;
-  snapTapOffHint: string;
   snapTapActive: string;
   snapTapFirstKey: string;
   snapTapSecondKey: string;
   snapTapResolverMode: string;
-  snapTapThreshold: string;
+  snapTapModeLastWon: string;
+  snapTapModeFirst: string;
+  snapTapModeSecond: string;
+  snapTapModeNeutral: string;
   snapTapDelay: string;
+  snapTapSave: string;
   snapTapDisable: string;
+  snapTapNeedsTwoKeys: string;
   snapTapNote: string;
   snapTapModeWarning: string;
-  snapTapNeedsTwoKeys: string;
-  snapTapStatus: string;
-  snapTapUnavailable: string;
-  snapTapUnavailableDetail: string;
 
   modTapTitle: string;
   modTapHint: string;
@@ -165,25 +164,23 @@ const ru: Strings = {
   navSystem: "Система",
 
   snapTapTitle: "Snap Tap",
-  snapTapHint: "Одно нажатие — первая клавиша, два быстрых — вторая",
-  snapTapOff: "Snap Tap выключен",
-  snapTapOffHint: "Включите, чтобы настроить пару клавиш",
+  snapTapHint: "Пока обе клавиши зажаты, резолвер решает, какая из них печатает",
   snapTapActive: "Snap Tap настроен",
   snapTapFirstKey: "Первая клавиша",
   snapTapSecondKey: "Вторая клавиша",
   snapTapResolverMode: "Режим резолвера",
-  snapTapThreshold: "Порог",
+  snapTapModeLastWon: "Последнее нажатие побеждает",
+  snapTapModeFirst: "Приоритет первой клавиши",
+  snapTapModeSecond: "Приоритет второй клавиши",
+  snapTapModeNeutral: "Нейтральный: обе зажаты — тишина",
   snapTapDelay: "Задержка",
+  snapTapSave: "Применить",
   snapTapDisable: "Выключить Snap Tap",
-  snapTapNote:
-    "Порог передан производителем как DKSV[0]/DKSV[1]; единица измерения не измерена, поэтому значение показано как есть.",
-  snapTapModeWarning:
-    "Клавиатура сама переводит обе клавиши в режим «своя точка». При выключении режимы возвращаются как были.",
   snapTapNeedsTwoKeys: "Выберите две разные клавиши в схеме выше",
-  snapTapStatus: "Состояние",
-  snapTapUnavailable: "Включение пока недоступно",
-  snapTapUnavailableDetail:
-    "Прошивка принимает и хранит пару, но включить переключение не удалось: поля mode и type не расшифрованы. Две записанные конфигурации либо оставляли клавиши без вывода, либо игнорировались. Поэтому запись отключена — значение наугад может сделать клавиши нерабочими. Чтение и сброс работают: если пара уже записана, её можно отключить здесь.",
+  snapTapNote:
+    "Семантика снята с драйвера производителя кадр-в-кадр и подтверждена нажатиями на клавиатуре. Пороги резолвера (DKSV) в рабочем потоке всегда нулевые — интерфейс их не показывает. Кадры для всех четырёх режимов закреплены тестами.",
+  snapTapModeWarning:
+    "Запись пары переводит обе клавиши в режим расширенной клавиши. Выключение возвращает их режимы как были.",
 
   modTapTitle: "Mod-Tap",
   modTapHint: "Короткое нажатие выдаёт одну клавишу, удержание дольше порога — другую",
@@ -355,25 +352,23 @@ const en: Strings = {
   navSystem: "System",
 
   snapTapTitle: "Snap Tap",
-  snapTapHint: "One press gives the first key, two quick presses give the second",
-  snapTapOff: "Snap Tap is off",
-  snapTapOffHint: "Turn it on to configure a key pair",
+  snapTapHint: "While both keys are held, the resolver decides which one types",
   snapTapActive: "Snap Tap configured",
   snapTapFirstKey: "First key",
   snapTapSecondKey: "Second key",
   snapTapResolverMode: "Resolver mode",
-  snapTapThreshold: "Threshold",
+  snapTapModeLastWon: "Last key pressed wins",
+  snapTapModeFirst: "First key wins",
+  snapTapModeSecond: "Second key wins",
+  snapTapModeNeutral: "Neutral: both held → silent",
   snapTapDelay: "Delay",
+  snapTapSave: "Apply",
   snapTapDisable: "Disable Snap Tap",
-  snapTapNote:
-    "The vendor calls these DKSV[0]/DKSV[1]. Their unit has not been measured, so the value is shown raw.",
-  snapTapModeWarning:
-    "The keyboard switches both keys to Single Mode on its own. Disabling restores the modes they had before.",
   snapTapNeedsTwoKeys: "Pick two different keys in the diagram above",
-  snapTapStatus: "Status",
-  snapTapUnavailable: "Enabling is not available yet",
-  snapTapUnavailableDetail:
-    "The firmware accepts and stores the pair, but switching could not be turned on: the mode and type fields are not understood. Two written configurations either left the keys emitting nothing or were ignored outright. Writing is therefore disabled, because a guessed value can make keys unusable. Reading and clearing work: if a pair is already stored, you can switch it off here.",
+  snapTapNote:
+    "Semantics captured frame-for-frame from the vendor driver and confirmed by pressing keys on the board. The resolver thresholds (DKSV) are always zero in the working flow, so the UI does not expose them. All four mode frames are pinned by tests.",
+  snapTapModeWarning:
+    "Writing a pair flags both keys as advanced keys. Disabling restores the modes they had before.",
 
   modTapTitle: "Mod-Tap",
   modTapHint: "A short press outputs one key, holding past the threshold outputs another",
