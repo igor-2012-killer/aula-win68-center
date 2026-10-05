@@ -111,37 +111,29 @@ impl Default for Lighting {
 
 /// A configured Snap Tap pair.
 ///
-/// Snap Tap switches a single key between two outputs: press once for the first
-/// key, tap twice for the second. The firmware stores it as an "advanced key"
-/// pair addressed by the **first** key, which is why reading it needs a sweep —
+/// Snap Tap binds two keys so that the resolver decides which one outputs
+/// while both are held. The firmware stores it as an "advanced key" pair
+/// addressed by the **first** key, which is why reading it needs a sweep —
 /// see `docs/VENDOR-DRIVER.md` §6.
+///
+/// The wire record also carries resolver-threshold fields (`value_a`,
+/// `value_b`) and the payload-7 byte, but every frame captured from the
+/// vendor's own driver sends them as zero, so they are deliberately not part
+/// of this model. An earlier build exposed the thresholds as sliders and two
+/// written configurations made keys inert — the vendor's zeros are what
+/// works.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SnapTap {
     /// First key of the pair, by HID id. This is the read address.
     pub key_a: u16,
     /// Second key of the pair.
     pub key_b: u16,
-    /// Resolver threshold for the first key, in firmware units.
-    ///
-    /// The vendor calls these `DKSV[0]` and `DKSV[1]`. Their unit has not been
-    /// confirmed by measurement, so the UI labels them as raw values rather
-    /// than pretending to be milliseconds.
-    pub value_a: u16,
-    /// Resolver threshold for the second key.
-    pub value_b: u16,
-    /// Resolver mode. `0` means Snap Tap is off for this pair.
+    /// Resolver mode: 0 = last key pressed wins ("Back cover"), 1 = the first
+    /// key wins, 2 = the second key wins, 3 = neutral (both held → neither).
+    /// Confirmed by capture; see `protocol::socd_mode`.
     pub mode: u8,
-    /// Trigger type, as sent by the vendor driver.
-    pub key_type: u8,
-    /// Dynamic delay in milliseconds.
+    /// Dynamic delay in milliseconds. The vendor's own UI sends 0.
     pub delay_ms: u16,
-}
-
-impl SnapTap {
-    /// True when the pair is stored but inactive.
-    pub fn is_inactive(&self) -> bool {
-        self.mode == 0 && self.value_a == 0 && self.value_b == 0
-    }
 }
 
 /// A key mode captured before Snap Tap overwrote it.

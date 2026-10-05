@@ -106,19 +106,28 @@ struct SnapTapOutcome {
 
 /// Performs a Snap Tap write, keeping the keyboard's key modes intact.
 ///
-/// Writing a pair makes the firmware switch **both** keys to Single Mode, and
-/// neither clearing the pair nor moving it to different keys undoes that. Three
-/// separate things therefore have to be handled, and getting any of them wrong
-/// leaves the user's keyboard in a mode they did not choose:
+/// Writing a pair makes the firmware set both keys' mode registers to `0x08`
+/// (the advanced-key type 8 lands in the low nibble of `layout::MODE`), and
+/// neither clearing the pair nor moving it to different keys undoes that.
+/// Three separate things therefore have to be handled, and getting any of them
+/// wrong leaves the user's keyboard in a mode they did not choose:
 ///
 /// * **Modes are captured before the write.** Reading them afterwards would only
-///   read back the Single Mode the write just caused.
+///   read back the mode the write just caused.
 /// * **Clearing** writes the *same* `key_b` with zeroed values — sending
 ///   `key_b = 0` is refused and leaves the pair in place — and then puts the
-///   saved modes back.
+///   saved modes back. This is frame-for-frame what the vendor driver's own
+///   Delete button does: it too writes the zeroed pair and then resets the two
+///   keys' mode registers, which is what actually deactivates the pair (the
+///   record itself stays behind on the keyboard).
 /// * **Moving to a different pair** must also *clear* the old pair. Restoring its
 ///   modes is not enough: the old pair would stay active on the keyboard, and a
 ///   later sweep could find it instead of the new one.
+///
+/// The resolver thresholds and the type byte are forced to zero: every frame
+/// captured from the vendor's working flow carries zeros there, and two
+/// written configurations with non-zero thresholds made keys inert. See
+/// `docs/VENDOR-DRIVER.md` §6 and `docs/RESEARCH-NOTES.md`.
 ///
 /// Free-standing rather than a method so the whole sequence is testable without
 /// a `Device`.
@@ -181,22 +190,20 @@ fn apply_snap_tap(
         p::KeyPair {
             key_a: new.key_a as u8,
             key_b: new.key_b as u8,
-            value_a: new.value_a,
-            value_b: new.value_b,
-            mode: new.mode,
-            key_type: new.key_type,
+            value_a: 0,
+            value_b: 0,
+            mode: 0,
+            resolver: new.mode,
             delay: new.delay_ms,
         },
     );
 
-    let active = (!new.is_inactive()).then_some(new);
+    // A `Some(pair)` request is always a real configuration — mode 0 is the
+    // vendor's "Back cover" (last key pressed wins), not an off state. Turning
+    // Snap Tap off is expressed as `pair = None`, which clears and restores.
     SnapTapOutcome {
-        active,
-        saved_modes: if active.is_some() {
-            saved_modes
-        } else {
-            Vec::new()
-        },
+        active: Some(new),
+        saved_modes,
     }
 }
 
@@ -288,10 +295,10 @@ fn read_snap_tap(link: &mut Link, key_a: u8) -> Result<SnapTap, ()> {
         .map(|parsed| SnapTap {
             key_a: parsed.key_a as u16,
             key_b: parsed.key_b as u16,
-            value_a: parsed.value_a,
-            value_b: parsed.value_b,
-            mode: parsed.mode,
-            key_type: parsed.key_type,
+            // The resolver mode semantic lives in wire byte 8 (frame offset
+            // 12) — `parsed.mode` is payload byte 7, which the vendor frames
+            // always carry as zero.
+            mode: parsed.resolver,
             delay_ms: parsed.delay,
         })
         .ok_or(())
@@ -299,12 +306,18 @@ fn read_snap_tap(link: &mut Link, key_a: u8) -> Result<SnapTap, ()> {
 
 /// Looks for a configured Snap Tap pair by sweeping every key.
 ///
+/// A record exists — and is live — while the read at `key_a` answers with both
+/// keys set. Clearing (the zeroed-pair write followed by the mode-register
+/// restore, exactly what the vendor's Delete button sends) removes the record
+/// entirely: verified on hardware, a read at `key_a` then answers all zeros.
+///
 /// Bails out on the first transport failure. Without that, an unreachable
 /// keyboard would cost one query timeout per key — about 17 seconds for 68 keys.
 fn find_snap_tap(link: &mut Link) -> Result<Option<SnapTap>, ()> {
     for id in keymap::all_ids() {
         match read_snap_tap(link, id as u8) {
-            Ok(found) if !found.is_inactive() => return Ok(Some(found)),
+            // key_a == 0 always answers empty, configured or not.
+            Ok(found) if found.key_a != 0 && found.key_b != 0 => return Ok(Some(found)),
             Ok(_) => {}
             Err(()) => return Err(()),
         }
@@ -320,13 +333,8 @@ fn find_snap_tap(link: &mut Link) -> Result<Option<SnapTap>, ()> {
 /// duration.
 fn probe_snap_tap(link: &mut Link, known: Option<u16>) -> SnapTapRead {
     let result = match known {
-        Some(key) => read_snap_tap(link, key as u8).map(|found| {
-            if found.is_inactive() {
-                None
-            } else {
-                Some(found)
-            }
-        }),
+        Some(key) => read_snap_tap(link, key as u8)
+            .map(|found| (found.key_a != 0 && found.key_b != 0).then_some(found)),
         None => find_snap_tap(link),
     };
     match result {
@@ -1877,14 +1885,12 @@ mod hardware {
         // HID ids of A and D, used as a scratch pair. Cleared again at the end.
         const KEY_A: u8 = 0x04;
         const KEY_D: u8 = 0x07;
-        const VALUE_A: u16 = 2;
-        const VALUE_D: u16 = 3;
-        const MODE: u8 = 1;
-        const DELAY: u16 = 10;
+        const MODE: u8 = 1; // first-key priority, confirmed by capture
 
-        // Writing a Snap Tap pair silently switches *both* keys to Single Mode
-        // (layout 8 = 0x08) and clearing the pair does not undo that, so the
-        // original modes have to be captured and written back.
+        // Writing a Snap Tap pair silently switches *both* keys' mode registers
+        // to 0x08 (the advanced-key type lands in the low nibble) and clearing
+        // the pair does not undo that, so the original modes have to be captured
+        // and written back.
         let original_modes: Vec<(u16, u16)> = [KEY_A, KEY_D]
             .iter()
             .map(|id| *id as u16)
@@ -1932,14 +1938,16 @@ mod hardware {
         // Start from a clean pair so the test is repeatable.
         write(&mut link, p::KeyPair::CLEARED);
 
+        // The vendor's working flow always carries zero thresholds, zero type
+        // and zero delay — the exact frame captured from its UI for mode 1.
         let configured = p::KeyPair {
             key_a: KEY_A,
             key_b: KEY_D,
-            value_a: VALUE_A,
-            value_b: VALUE_D,
-            mode: MODE,
-            key_type: 0,
-            delay: DELAY,
+            value_a: 0,
+            value_b: 0,
+            mode: 0,
+            resolver: MODE,
+            delay: 0,
         };
         write(&mut link, configured);
         let got = read_pair(&mut link).expect("Snap Tap read after write");
@@ -2077,20 +2085,14 @@ mod hardware {
         const PAIR_A: SnapTap = SnapTap {
             key_a: 0x04,
             key_b: 0x07,
-            value_a: 2,
-            value_b: 3,
-            mode: 1,
-            key_type: 0,
-            delay_ms: 10,
+            mode: 1, // first-key priority
+            delay_ms: 0,
         };
         const PAIR_B: SnapTap = SnapTap {
             key_a: 0x05,
             key_b: 0x06,
-            value_a: 4,
-            value_b: 5,
             mode: 1,
-            key_type: 0,
-            delay_ms: 20,
+            delay_ms: 0,
         };
         let ids = |p: &SnapTap| [p.key_a, p.key_b];
 
@@ -2139,10 +2141,11 @@ mod hardware {
             baseline.iter().map(|m| m.mode).collect::<Vec<_>>(),
             "captured modes must be the pre-write ones, not the Single Mode the write causes"
         );
-        // The firmware switches both keys to Single Mode as a side effect of
-        // writing the pair. `aula-probe layout 8` shows it reliably from a fresh
-        // process, but reading the mode back on this handle keeps reporting the
-        // pre-write value even after the handle is closed and re-opened. That
+        // The firmware sets both keys' mode registers to 0x08 (the advanced-key
+        // type lands in the low nibble) as a side effect of writing the pair.
+        // `aula-probe layout 8` shows it reliably from a fresh process, but
+        // reading the mode back on this handle keeps reporting the pre-write
+        // value even after the handle is closed and re-opened. That
         // discrepancy is unresolved and recorded in `docs/RESEARCH-NOTES.md`, so
         // it is deliberately not asserted here: a test must not depend on a
         // behaviour nobody can reproduce yet. Production drops the handle after
@@ -2151,8 +2154,8 @@ mod hardware {
             .expect("sweep must not fail")
             .expect("pair A should be found");
         assert_eq!((found.key_a, found.key_b), (PAIR_A.key_a, PAIR_A.key_b));
-        assert_eq!((found.value_a, found.value_b), (2, 3));
-        assert_eq!(found.delay_ms, 10);
+        assert_eq!(found.mode, PAIR_A.mode);
+        assert_eq!(found.delay_ms, 0);
 
         // Move to pair B. The old pair must be retired, otherwise a later sweep
         // can find it instead of the new one and the UI shows the wrong keys.

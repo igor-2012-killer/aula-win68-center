@@ -125,16 +125,24 @@ pub mod touch_mode {
     pub const RAPID_TRIGGER: u8 = 2;
 }
 
-/// `SOCD` resolver mode values seen so far.
+/// `SOCD` resolver mode values, **confirmed by capture** from the vendor
+/// driver on 2026-10-05: each mode was selected in the vendor's own UI, its
+/// Save pressed, and the frame read off the wire (see `docs/VENDOR-DRIVER.md`
+/// §6). Behaviour of modes 0 (last-won) and 3 (neutral) was then confirmed on
+/// the board by pressing keys.
 ///
-/// `0` disables the pair (`KeyPair::CLEARED`). The vendor driver's UI offers
-/// four resolver modes — last-pressed-wins, first-key priority, second-key
-/// priority, and neutral — but the numeric encoding has not been captured from
-/// that UI yet; `1` was accepted and persisted by the firmware in the
-/// round-trip test. See `docs/VENDOR-DRIVER.md` §6 and
-/// `docs/RESEARCH-NOTES.md` before writing a pair.
+/// The vendor's frames always carry `value_a = value_b = 0`, `mode = 0`
+/// (payload byte 7) and `delay = 0`; the resolver thresholds are not part of
+/// the position-binding flow, and the resolver mode itself travels in payload
+/// byte 8 (the bundle's `type` parameter — see `KeyPair::resolver`).
 pub mod socd_mode {
+    /// "Back cover": the key pressed **last** wins while both are held.
     pub const LAST_WON: u8 = 0;
+    /// The **first** key of the pair wins.
+    pub const FIRST_PRIORITY: u8 = 1;
+    /// The **second** key of the pair wins.
+    pub const SECOND_PRIORITY: u8 = 2;
+    /// Both held → neither fires.
     pub const NEUTRAL: u8 = 3;
 }
 
@@ -211,6 +219,13 @@ pub fn cmd_packet(cmd: u8, value: Option<u8>) -> [u8; PACKET_LEN] {
 }
 
 /// One Snap Tap / Rapid Switch pair, as stored on the keyboard.
+///
+/// Field names follow the vendor bundle's `SOCDV4Pack` parameters, with one
+/// documented correction from the 2026-10-05 capture session: the bundle calls
+/// payload byte 7 `mode` and byte 8 `type`, but the resolver mode selection
+/// actually travels in **byte 8** — every captured frame carries 0 in byte 7,
+/// and pressing keys confirmed the behaviour follows byte 8. See
+/// `docs/VENDOR-DRIVER.md` §6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KeyPair {
     /// First key of the pair, by HID id.
@@ -220,14 +235,21 @@ pub struct KeyPair {
     /// `key_a = 0` therefore always looks empty, which is a large part of why
     /// Snap Tap looked broken for so long.
     pub key_a: u8,
-    /// Second key of the pair. Stays recorded even after the pair is cleared.
+    /// Second key of the pair.
     pub key_b: u8,
+    /// Resolver threshold for the first key. The vendor's working flow always
+    /// sends 0; non-zero guesses made keys inert.
     pub value_a: u16,
+    /// Resolver threshold for the second key. See `value_a`.
     pub value_b: u16,
-    /// Resolver mode. `0` disables the pair.
+    /// Payload byte 7. The bundle names it `mode`, but every captured frame
+    /// — including all four resolver modes — carries 0 here. Kept for wire
+    /// fidelity; always write 0.
     pub mode: u8,
-    /// Trigger type, as sent by the vendor driver.
-    pub key_type: u8,
+    /// Payload byte 8. The bundle names it `type`, but the capture proves this
+    /// is the **resolver mode**: 0 = last key pressed wins, 1 = the first key,
+    /// 2 = the second key, 3 = neutral. See `socd_mode`.
+    pub resolver: u8,
     /// Dynamic delay in milliseconds.
     pub delay: u16,
 }
@@ -240,17 +262,18 @@ impl KeyPair {
         value_a: 0,
         value_b: 0,
         mode: 0,
-        key_type: 0,
+        resolver: 0,
         delay: 0,
     };
 
     /// True when the pair is **inert**, i.e. cleared.
     ///
-    /// The firmware keeps the two key ids recorded after a clear — writing
-    /// `key_b = 0` refuses to unlink the pair — so an inert pair may still report
-    /// `key_b != 0`. What matters is that no resolver values or mode remain.
+    /// The zeroed-pair write followed by the two mode-register resets — what
+    /// both the vendor's Delete button and this repo's clear path send —
+    /// removes the record entirely: verified on hardware, the read at `key_a`
+    /// then answers all zeros.
     pub fn is_cleared(&self) -> bool {
-        self.value_a == 0 && self.value_b == 0 && self.mode == 0 && self.delay == 0
+        self.value_a == 0 && self.value_b == 0 && self.resolver == 0 && self.delay == 0
     }
 }
 
@@ -281,7 +304,7 @@ pub fn pair_packet(write: bool, cmd: u8, pair: KeyPair) -> [u8; PACKET_LEN] {
     b.put_u16(pair.value_a);
     b.put_u16(pair.value_b);
     b.put(pair.mode);
-    b.put(pair.key_type);
+    b.put(pair.resolver);
     b.put_u16(pair.delay);
     b.finish()
 }
@@ -304,7 +327,7 @@ pub fn parse_pair(reply: &[u8]) -> Option<KeyPair> {
         value_a: u16::from_le_bytes([reply[7], reply[8]]),
         value_b: u16::from_le_bytes([reply[9], reply[10]]),
         mode: reply[11],
-        key_type: reply[12],
+        resolver: reply[12],
         delay: u16::from_le_bytes([reply[13], reply[14]]),
     })
 }
@@ -790,7 +813,7 @@ mod tests {
             value_a: 2,
             value_b: 3,
             mode: 0x01,
-            key_type: 0x00,
+            resolver: 0x00,
             delay: 10,
         };
         for cmd_id in [cmd::SOCD, cmd::RAPID_SWITCH] {
@@ -809,6 +832,95 @@ mod tests {
             let read = pair_packet(false, cmd_id, KeyPair::CLEARED);
             assert_eq!(read[4], 0, "byte 4 is the read/write flag");
         }
+    }
+
+    #[test]
+    fn matches_the_four_resolver_mode_frames_captured_from_the_vendor_driver() {
+        // Captured 2026-10-05: pair A(0x04)/D(0x07) configured in the vendor's
+        // own UI, one Save per resolver mode, frames read off the wire via the
+        // WebHID logger. The vendor always sends the resolver thresholds and
+        // the type byte as zero, and the delay as zero. The checksum only
+        // folds in the last payload byte (the delay's low byte), so it stays
+        // 0xC8 for every mode.
+        for (mode, tail) in [
+            // "Back cover": the last key pressed wins.
+            (socd_mode::LAST_WON, 0x00),
+            // "Keys in the red box take precedence": the first key wins.
+            (socd_mode::FIRST_PRIORITY, 0x01),
+            // "Keys in the blue box take precedence": the second key wins.
+            (socd_mode::SECOND_PRIORITY, 0x02),
+            // "Neutral": both held, neither fires.
+            (socd_mode::NEUTRAL, 0x03),
+        ] {
+            let pair = KeyPair {
+                key_a: 0x04,
+                key_b: 0x07,
+                value_a: 0,
+                value_b: 0,
+                mode: 0,
+                resolver: mode,
+                delay: 0,
+            };
+            let p = pair_packet(true, cmd::SOCD, pair);
+            let expected = {
+                let mut f = [0u8; PACKET_LEN];
+                f[..15].copy_from_slice(&[
+                    HEADER,
+                    0x0B,
+                    cmd::SOCD,
+                    0xC8,
+                    0x01,
+                    0x04,
+                    0x07,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    tail,
+                    0x00,
+                    0x00,
+                ]);
+                f
+            };
+            assert_eq!(p, expected, "mode {mode} frame must match the capture");
+        }
+    }
+
+    #[test]
+    fn matches_the_delete_frame_captured_from_the_vendor_driver() {
+        // The vendor's Delete button writes the same pair with zeroed values
+        // and mode 0 — the same frame this repo's clear path has always sent —
+        // and then resets the mode register of both keys, which is what
+        // actually deactivates the pair (the record itself stays behind).
+        let p = pair_packet(
+            true,
+            cmd::SOCD,
+            KeyPair {
+                key_a: 0x04,
+                key_b: 0x07,
+                ..KeyPair::CLEARED
+            },
+        );
+        let mut expected = [0u8; PACKET_LEN];
+        expected[..15].copy_from_slice(&[
+            HEADER,
+            0x0B,
+            cmd::SOCD,
+            0xC8,
+            0x01,
+            0x04,
+            0x07,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        ]);
+        assert_eq!(p, expected, "delete frame must match the capture");
     }
 
     #[test]
@@ -895,7 +1007,7 @@ mod tests {
             value_a: 0x0102,
             value_b: 0x0304,
             mode: 0x01,
-            key_type: 0x00,
+            resolver: 0x00,
             delay: 10,
         };
         let p = pair_packet(true, cmd::SOCD, pair);

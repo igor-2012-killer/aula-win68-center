@@ -105,32 +105,25 @@ async fn reset_keys(device: Dev<'_>, key_ids: Vec<u16>) -> Result<(), String> {
 ///
 /// The wire field is 16-bit, so this is a sanity limit rather than a
 /// representability one. `MAX_DELAY_MS` in `src/components/tabs/SnapTapTab.tsx`
-/// must match, otherwise the slider and the backend disagree.
+/// must match, otherwise the slider and the backend disagree. The vendor's own
+/// UI sends 0.
 const MAX_SNAP_TAP_DELAY_MS: u16 = 500;
 
 /// Whether Snap Tap may be written at all.
 ///
-/// Storage is verified and clearing works, but the resolver's `mode` and `type`
-/// fields are not understood. Two written configurations were tried on real
-/// hardware: one made the keys emit a non-printable HID code so they appeared
-/// dead, the other was stored and had no effect at all.
-///
-/// Refusing the write is deliberate. A control that stores a plausible-looking
-/// configuration which silently does nothing — or which bricks two keys — is
-/// worse than no control, and the values that would be needed to make it work
-/// are guesses. Flip this once the semantics are known; see
-/// `docs/RESEARCH-NOTES.md`.
-const SNAP_TAP_WRITES_ENABLED: bool = false;
+/// Left in as a kill switch. The resolver semantics were recovered on
+/// 2026-10-05 by capturing one Save per mode from the vendor's own WebHID
+/// driver (`docs/VENDOR-DRIVER.md` §6), and both the neutral and the
+/// last-pressed-wins modes were then confirmed working on the board by
+/// pressing keys. The resolver thresholds that made two earlier guessed
+/// configurations inert are forced to zero by the backend — the vendor's
+/// frames always carry zeros there.
+const SNAP_TAP_WRITES_ENABLED: bool = true;
 
 #[tauri::command]
 async fn set_snap_tap(device: Dev<'_>, pair: SnapTap) -> Result<(), String> {
     if !SNAP_TAP_WRITES_ENABLED {
-        return Err(
-            "Snap Tap writes are disabled: the resolver's mode and type fields are not \
-             understood, and writing a guessed value can leave keys unusable. \
-             See docs/RESEARCH-NOTES.md."
-                .into(),
-        );
+        return Err("Snap Tap writes are disabled by the kill switch".into());
     }
     if pair.key_a == pair.key_b {
         return Err("Snap Tap needs two different keys".into());
@@ -138,8 +131,8 @@ async fn set_snap_tap(device: Dev<'_>, pair: SnapTap) -> Result<(), String> {
     if pair.key_a > 0xFF || pair.key_b > 0xFF {
         return Err("key id out of range".into());
     }
-    if pair.mode == 0 {
-        return Err("mode 0 disables Snap Tap — use clear_snap_tap instead".into());
+    if pair.mode > 3 {
+        return Err("mode must be 0..=3 (0 last-won, 1 first key, 2 second key, 3 neutral)".into());
     }
     if pair.delay_ms > MAX_SNAP_TAP_DELAY_MS {
         return Err(format!("delay must be 0..={MAX_SNAP_TAP_DELAY_MS} ms"));
@@ -148,6 +141,10 @@ async fn set_snap_tap(device: Dev<'_>, pair: SnapTap) -> Result<(), String> {
 }
 
 /// Turns Snap Tap off and puts the pair's keys back the way they were.
+///
+/// This is frame-for-frame what the vendor driver's Delete button does: the
+/// zeroed pair followed by the two mode-register resets, which together remove
+/// the record — verified by reading the pair address back after clearing.
 #[tauri::command]
 async fn clear_snap_tap(device: Dev<'_>) -> Result<(), String> {
     run_job(device, move |tx| Job::SnapTap(None, tx)).await

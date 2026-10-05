@@ -781,14 +781,14 @@ fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
     let value_a = nums.get(2).copied().unwrap_or(0);
     let value_b = nums.get(3).copied().unwrap_or(0);
     let mode = nums.get(4).copied().unwrap_or(0) as u8;
-    let key_type = nums.get(5).copied().unwrap_or(0) as u8;
+    let resolver = nums.get(5).copied().unwrap_or(0) as u8;
     let delay = nums.get(6).copied().unwrap_or(0);
     let writing = confirmed;
 
     if writing {
         println!(
             "{YELLOW}writing: keyA=0x{key_a:02x} keyB=0x{key_b:02x} vA={value_a} vB={value_b} \
-             mode={mode} type={key_type} delay={delay}{RESET}"
+             mode={mode} resolver={resolver} delay={delay}{RESET}"
         );
     }
 
@@ -798,7 +798,7 @@ fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
         value_a,
         value_b,
         mode,
-        key_type,
+        resolver,
         delay,
     };
     let packet = p::pair_packet(writing, cmd_id, pair);
@@ -820,7 +820,7 @@ fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
             println!("  valueA  {}", pair.value_a);
             println!("  valueB  {}", pair.value_b);
             println!("  mode    0x{:02x}", pair.mode);
-            println!("  type    0x{:02x}", pair.key_type);
+            println!("  resolver 0x{:02x}", pair.resolver);
             println!("  delay   {}", pair.delay);
         } else {
             println!("{YELLOW}reply too short to parse{RESET}");
