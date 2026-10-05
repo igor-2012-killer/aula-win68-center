@@ -78,7 +78,7 @@ pub static KEYS: &[KeyDef] = &[
     KeyDef { id: 55,  row: 4, col: 10, label: ".",    x: 10.25, y: 3.0, w: 1.0  },
     KeyDef { id: 56,  row: 4, col: 11, label: "/",    x: 11.25, y: 3.0, w: 1.0  },
     KeyDef { id: 229, row: 4, col: 12, label: "Shift", x: 12.25, y: 3.0, w: 1.75 },
-    KeyDef { id: 82,  row: 4, col: 13, label: "▲", x: 14.0, y: 3.0, w: 1.0 },
+    KeyDef { id: 82,  row: 4, col: 13, label: "↑", x: 14.0, y: 3.0, w: 1.0 },
     KeyDef { id: 78,  row: 4, col: 14, label: "PgDn",  x: 15.0,  y: 3.0, w: 1.0  },
 
     KeyDef { id: 224, row: 5, col: 0,  label: "Ctrl",  x: 0.0,   y: 4.0, w: 1.25 },
@@ -176,5 +176,18 @@ mod tests {
         for (name, ids) in presets() {
             assert!(!ids.is_empty(), "preset {name} is empty");
         }
+    }
+
+    #[test]
+    fn arrows_preset_contains_all_four_arrows() {
+        // The Up key used to be labelled `▲`, which the preset filter did not
+        // match, so `arrows` silently carried three of the four arrows.
+        let arrows = presets()
+            .into_iter()
+            .find(|(name, _)| *name == "arrows")
+            .map(|(_, ids)| ids)
+            .expect("arrows preset exists");
+        assert_eq!(arrows.len(), 4, "all four arrows must be selected");
+        assert_eq!(arrows, vec![82, 80, 81, 79], "↑ ← ↓ → by id");
     }
 }

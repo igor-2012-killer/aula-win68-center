@@ -125,11 +125,14 @@ pub mod touch_mode {
     pub const RAPID_TRIGGER: u8 = 2;
 }
 
-/// `SOCD` resolver mode.
+/// `SOCD` resolver mode values seen so far.
 ///
-/// Verified: command 44 answers reads but always reports zeros, and no payload
-/// variant changes them. Snap Tap is **not configurable** on firmware 9.1 of the
-/// WIN68 HE Pro, so the app does not expose it. See `device::hardware`.
+/// `0` disables the pair (`KeyPair::CLEARED`). The vendor driver's UI offers
+/// four resolver modes — last-pressed-wins, first-key priority, second-key
+/// priority, and neutral — but the numeric encoding has not been captured from
+/// that UI yet; `1` was accepted and persisted by the firmware in the
+/// round-trip test. See `docs/VENDOR-DRIVER.md` §6 and
+/// `docs/RESEARCH-NOTES.md` before writing a pair.
 pub mod socd_mode {
     pub const LAST_WON: u8 = 0;
     pub const NEUTRAL: u8 = 3;

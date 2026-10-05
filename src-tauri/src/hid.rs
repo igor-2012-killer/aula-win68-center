@@ -106,11 +106,15 @@ impl Link {
 
     /// Send a packet and wait for a single 64-byte reply.
     pub fn query(&mut self, packet: [u8; PACKET_LEN]) -> Option<p::Response> {
-        self.query_multi(packet, PACKET_LEN).map(|raw| {
-            let mut bytes = [0u8; PACKET_LEN];
-            bytes.copy_from_slice(&raw[..PACKET_LEN]);
-            p::Response(bytes)
-        })
+        let raw = self.query_multi(packet, PACKET_LEN)?;
+        // A short read must not panic the caller: this runs on the app's only
+        // I/O thread, which release builds compile with `panic = "abort"`.
+        if raw.len() < PACKET_LEN {
+            return None;
+        }
+        let mut bytes = [0u8; PACKET_LEN];
+        bytes.copy_from_slice(&raw[..PACKET_LEN]);
+        Some(p::Response(bytes))
     }
 
     /// Send a packet and accumulate up to `want` bytes of reply.
