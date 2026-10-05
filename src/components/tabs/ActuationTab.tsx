@@ -1,4 +1,4 @@
-﻿import { useMemo } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 import { PRESET_LABELS, STRINGS, type Lang } from "../../i18n";
 import { api } from "../../ipc";
 import { MODE_LABEL, type KeyboardState } from "../../types";
@@ -8,8 +8,7 @@ interface Props {
   state: KeyboardState;
   lang: Lang;
   selection: number[];
-  notify: (text: string, tone?: "ok" | "error") => void;
-  run: (label: string, task: () => Promise<unknown>) => Promise<void>;
+  run: (task: () => Promise<unknown>) => Promise<boolean>;
   selectMany: (ids: number[]) => void;
   clearSelection: () => void;
 }
@@ -31,6 +30,11 @@ export function ActuationTab({
     () => state.presets.find(([name]) => name === "all")?.[1] ?? [],
     [state.presets],
   );
+  const labelById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const def of state.layout) map.set(def.id, def.label);
+    return map;
+  }, [state.layout]);
 
   const first = none ? undefined : state.keys[selection[0]!];
   const mixed = useMemo(() => {
@@ -51,12 +55,14 @@ export function ActuationTab({
           max={state.max_travel}
           step={state.step}
           disabled={offline}
-          onCommit={(value) => void run(t.saved, () => api.setGlobalActuation(value))}
+          onCommit={(value) => run(() => api.setGlobalActuation(value))}
         />
         <p class="note">
-          {lang === "ru"
-            ? `Диапазон клавиатуры: ${state.min_travel.toFixed(2)} – ${state.max_travel.toFixed(2)} мм, шаг ${state.step.toFixed(2)} мм`
-            : `Keyboard range: ${state.min_travel.toFixed(2)} – ${state.max_travel.toFixed(2)} mm, step ${state.step.toFixed(2)} mm`}
+          {t.keyboardRangeNote(
+            state.min_travel.toFixed(2),
+            state.max_travel.toFixed(2),
+            state.step.toFixed(2),
+          )}
         </p>
       </Panel>
 
@@ -78,19 +84,18 @@ export function ActuationTab({
         </div>
 
         {none ? (
-          <p class="empty">{lang === "ru" ? "Клавиши не выбраны" : "No keys selected"}</p>
+          <p class="empty">{t.noKeysSelected}</p>
         ) : (
           <ul class="keylist">
             {selection.slice(0, 14).map((id) => {
               const settings = state.keys[id];
-              const key = state.layout.find((k) => k.id === id);
               const value =
                 settings?.mode === "rapidtrigger"
                   ? `${settings.rt_press.toFixed(2)} / ${settings.rt_release.toFixed(2)}`
                   : `${settings?.actuation.toFixed(2) ?? "—"} mm`;
               return (
                 <li class="keylist__row" key={id}>
-                  <span class="keylist__cap">{key?.label ?? id}</span>
+                  <span class="keylist__cap">{labelById.get(id) ?? id}</span>
                   <span class={`tag mode-${settings?.mode ?? "global"}`}>
                     {MODE_LABEL[settings?.mode ?? "global"]}
                   </span>
@@ -117,14 +122,14 @@ export function ActuationTab({
           max={state.max_travel}
           step={state.step}
           disabled={offline || none}
-          onCommit={(value) => void run(t.saved, () => api.setKeysActuation(ids, value))}
+          onCommit={(value) => run(() => api.setKeysActuation(ids, value))}
         />
 
         <div class="btn-row">
           <Button
             variant="danger"
             disabled={offline || none}
-            onClick={() => void run(t.saved, () => api.resetKeys(ids))}
+            onClick={() => void run(() => api.resetKeys(ids))}
           >
             {t.resetSelected}
           </Button>
@@ -132,7 +137,7 @@ export function ActuationTab({
             variant="danger"
             disabled={offline || allIds.length === 0}
             onClick={() => {
-              if (confirm(t.resetAllConfirm)) void run(t.saved, () => api.resetKeys(allIds));
+              if (confirm(t.resetAllConfirm)) void run(() => api.resetKeys(allIds));
             }}
           >
             {t.resetAll}
@@ -149,9 +154,7 @@ export function ActuationTab({
           step={0.01}
           disabled={offline || none}
           accent="emerald"
-          onCommit={(value) =>
-            void run(t.saved, () => api.setKeysDeadzone(ids, value, deadzoneRelease))
-          }
+          onCommit={(value) => run(() => api.setKeysDeadzone(ids, value, deadzoneRelease))}
         />
         <Slider
           label={t.releaseDeadzone}
@@ -161,9 +164,7 @@ export function ActuationTab({
           step={0.01}
           disabled={offline || none}
           accent="emerald"
-          onCommit={(value) =>
-            void run(t.saved, () => api.setKeysDeadzone(ids, deadzonePress, value))
-          }
+          onCommit={(value) => run(() => api.setKeysDeadzone(ids, deadzonePress, value))}
         />
         <p class="note">{t.deadzoneNote}</p>
       </Panel>

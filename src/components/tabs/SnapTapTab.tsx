@@ -7,7 +7,7 @@ interface Props {
   state: KeyboardState;
   lang: Lang;
   selection: number[];
-  run: (label: string, task: () => Promise<unknown>) => Promise<void>;
+  run: (task: () => Promise<unknown>) => Promise<boolean>;
 }
 
 /**
@@ -24,20 +24,12 @@ const RESOLVER_MODES = [
 ] as const;
 
 /**
- * Whether enabling Snap Tap is offered at all.
+ * The resolver thresholds and the delay are 16-bit fields on the wire.
  *
- * Storage is verified: the frame writes, reads back and the firmware keeps it.
- * Behaviour is not. Two written configurations left the keys inert — one made
- * them emit a non-printable HID code, the other was stored and ignored. The
- * `mode` and `type` fields are not understood, so enabling stays off rather than
- * shipping a control that writes a plausible-looking no-op.
- *
- * Flip to `true` once the resolver semantics are known. See
- * `docs/RESEARCH-NOTES.md`.
+ * Enabling Snap Tap stays out of the UI entirely: storage is verified, but the
+ * resolver's `mode` / `type` semantics are not, and two guessed writes left
+ * keys inert. See `docs/RESEARCH-NOTES.md`.
  */
-export const CAN_ENABLE_SNAP_TAP = false;
-
-/** The resolver thresholds and the delay are 16-bit fields on the wire. */
 const MAX_RAW = 0xffff;
 const MAX_DELAY_MS = 500;
 
@@ -91,12 +83,12 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
           hint={`${label(configured.key_a)} / ${label(configured.key_b)}`}
           checked
           disabled={offline}
-          onChange={() => void run(t.saved, () => api.clearSnapTap())}
+          onChange={() => void run(() => api.clearSnapTap())}
         />
         <Row label={t.snapTapFirstKey}>{label(configured.key_a)}</Row>
         <Row label={t.snapTapSecondKey}>{label(configured.key_b)}</Row>
         <p class="note">{t.snapTapUnavailableDetail}</p>
-        <Button variant="danger" disabled={offline} onClick={() => void run(t.saved, () => api.clearSnapTap())}>
+        <Button variant="danger" disabled={offline} onClick={() => void run(() => api.clearSnapTap())}>
           {t.snapTapDisable}
         </Button>
       </Panel>

@@ -1,21 +1,22 @@
-﻿import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { STRINGS, type Lang } from "./i18n";
-import { api } from "./ipc";
 import { useStore } from "./store";
 import { Keyboard } from "./components/Keyboard";
 import { ActuationTab } from "./components/tabs/ActuationTab";
 import { RapidTab } from "./components/tabs/RapidTab";
 import { SnapTapTab } from "./components/tabs/SnapTapTab";
+import { ModTapTab } from "./components/tabs/ModTapTab";
 import { LightingTab } from "./components/tabs/LightingTab";
 import { SensorsTab } from "./components/tabs/SensorsTab";
 import { SystemTab } from "./components/tabs/SystemTab";
 
-type TabId = "actuation" | "rapid" | "snaptap" | "lighting" | "sensors" | "system";
+type TabId = "actuation" | "rapid" | "snaptap" | "modtap" | "lighting" | "sensors" | "system";
 
 type NavKey =
   | "navActuation"
   | "navRapid"
   | "navSnapTap"
+  | "navModTap"
   | "navLighting"
   | "navSensors"
   | "navSystem";
@@ -24,6 +25,7 @@ const TABS: [TabId, NavKey][] = [
   ["actuation", "navActuation"],
   ["rapid", "navRapid"],
   ["snaptap", "navSnapTap"],
+  ["modtap", "navModTap"],
   ["lighting", "navLighting"],
   ["sensors", "navSensors"],
   ["system", "navSystem"],
@@ -31,7 +33,7 @@ const TABS: [TabId, NavKey][] = [
 
 export function App() {
   const store = useStore();
-  const { state, lang, selection, selectedSet, sensors, toasts, busy, run } = store;
+  const { state, lang, selection, selectedSet, sensors, toasts, busy, link, run } = store;
   const [tab, setTab] = useState<TabId>("actuation");
   const [liveOverlay, setLiveOverlay] = useState(false);
   const t = STRINGS[lang];
@@ -42,13 +44,42 @@ export function App() {
   }, [tab]);
 
   const status = useMemo(() => {
-    if (!state) return { tone: "pending", text: t.linking };
-    if (state.reconnecting) return { tone: "pending", text: t.reconnecting };
-    if (state.connected) return { tone: "online", text: t.connected };
-    return { tone: "offline", text: state.last_error ?? t.disconnected };
-  }, [state, t]);
+    switch (link.state) {
+      case "connecting":
+        return { tone: "pending", text: t.linking };
+      case "reconnecting":
+        return { tone: "pending", text: t.reconnecting };
+      case "online":
+        return { tone: "online", text: t.connected };
+      default:
+        return { tone: "offline", text: link.detail ?? t.disconnected };
+    }
+  }, [link, t]);
 
   const toggleLang = () => store.setLang(lang === "ru" ? "en" : "ru");
+
+  const onTabKeyDown = (e: KeyboardEvent) => {
+    const index = TABS.findIndex(([id]) => id === tab);
+    let next: number | null = null;
+    if (e.key === "ArrowRight") next = (index + 1) % TABS.length;
+    if (e.key === "ArrowLeft") next = (index - 1 + TABS.length) % TABS.length;
+    if (next != null) {
+      e.preventDefault();
+      setTab(TABS[next]![0]);
+    }
+  };
+
+  const offlineBanner =
+    state && link.state === "offline" ? (
+      <div class="offline-banner" role="alert">
+        <span>
+          <strong>{t.offlineBanner}.</strong> {link.detail ?? status.text}
+        </span>
+        <button type="button" class="btn" onClick={() => void store.reconnect()}>
+          {t.reconnect}
+        </button>
+      </div>
+    ) : null;
 
   return (
     <div class="app" data-busy={busy || undefined}>
@@ -71,6 +102,7 @@ export function App() {
             type="button"
             class={`lang${lang === "en" ? " is-active" : ""}`}
             onClick={toggleLang}
+            aria-pressed={lang === "en"}
             title={t.language}
           >
             RU / EN
@@ -78,11 +110,13 @@ export function App() {
         </div>
       </header>
 
-      <nav class="tabs">
+      <nav class="tabs" role="tablist" onKeyDown={onTabKeyDown}>
         {TABS.map(([id, labelKey]) => (
           <button
             key={id}
             type="button"
+            role="tab"
+            aria-selected={tab === id}
             class={`tab${tab === id ? " is-active" : ""}`}
             onClick={() => setTab(id)}
           >
@@ -93,6 +127,7 @@ export function App() {
 
       {state ? (
         <main class="main">
+          {offlineBanner}
           <section class="deck">
             <Keyboard
               layout={state.layout}
@@ -123,7 +158,6 @@ export function App() {
                 state={state}
                 lang={lang}
                 selection={selection}
-                notify={store.notify}
                 run={run}
                 selectMany={store.selectMany}
                 clearSelection={store.clearSelection}
@@ -133,26 +167,46 @@ export function App() {
               <RapidTab state={state} lang={lang} selection={selection} run={run} />
             ) : null}
             {tab === "snaptap" ? (
-        <SnapTapTab state={state} lang={lang} selection={selection} run={run} />
-      ) : null}
-      {tab === "lighting" ? <LightingTab state={state} lang={lang} run={run} /> : null}
+              <SnapTapTab state={state} lang={lang} selection={selection} run={run} />
+            ) : null}
+            {tab === "modtap" ? (
+              <ModTapTab
+                state={state}
+                lang={lang}
+                selection={selection}
+                run={run}
+                notify={store.notify}
+              />
+            ) : null}
+            {tab === "lighting" ? <LightingTab state={state} lang={lang} run={run} /> : null}
             {tab === "sensors" ? <SensorsTab state={state} lang={lang} sensors={sensors} /> : null}
-            {tab === "system" ? <SystemTab state={state} lang={lang} run={run} /> : null}
+            {tab === "system" ? (
+              <SystemTab state={state} lang={lang} run={run} notify={store.notify} />
+            ) : null}
           </div>
         </main>
       ) : (
         <main class="main main--boot">
           <div class="boot">
-            <span class="boot__spinner" />
-            <p>{t.linking}</p>
-            <button type="button" class="btn" onClick={() => void api.reconnect()}>
+            {link.state === "offline" ? (
+              <>
+                <p>{t.offlineBanner}</p>
+                <p class="note">{link.detail ?? t.disconnected}</p>
+              </>
+            ) : (
+              <>
+                <span class="boot__spinner" />
+                <p>{t.linking}</p>
+              </>
+            )}
+            <button type="button" class="btn" onClick={() => void store.reconnect()}>
               {t.reconnect}
             </button>
           </div>
         </main>
       )}
 
-      <div class="toasts">
+      <div class="toasts" role="status" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} class={`toast toast--${toast.tone}`}>
             {toast.text}

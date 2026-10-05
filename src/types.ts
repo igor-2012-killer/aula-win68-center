@@ -75,11 +75,23 @@ export interface KeyboardState {
    * not present them as millimetres.
    */
   snap_tap: SnapTap | null;
+  /** Keys carrying a Mod-Tap assignment, sorted by key id. */
+  mod_tap: ModTapAssignment[];
   keys: Record<number, KeySettings>;
   layout: KeyDef[];
   presets: [string, number[]][];
-  /** Micrometres, indexed by `row * 21 + col`. */
-  sensors: number[];
+}
+
+/** Mirrors `state.rs::ModTapAssignment`. */
+export interface ModTapAssignment {
+  /** HID id of the key the assignment lives on; also the read address. */
+  key_id: number;
+  /** HID usage id emitted on a hold past the threshold; 0 = no output. */
+  hold_key: number;
+  /** HID usage id emitted on a short press; 0 = no output. */
+  tap_key: number;
+  /** Hold threshold, milliseconds. */
+  delay_ms: number;
 }
 
 export const SENSOR_COLS = 21;

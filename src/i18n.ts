@@ -1,15 +1,16 @@
-﻿export type Lang = "ru" | "en";
+export type Lang = "ru" | "en";
 
 interface Strings {
   appTitle: string;
   connected: string;
-  connecting: string;
   disconnected: string;
   reconnect: string;
+  offlineBanner: string;
 
   navActuation: string;
   navRapid: string;
   navSnapTap: string;
+  navModTap: string;
   navLighting: string;
   navSensors: string;
   navSystem: string;
@@ -32,10 +33,26 @@ interface Strings {
   snapTapUnavailable: string;
   snapTapUnavailableDetail: string;
 
+  modTapTitle: string;
+  modTapHint: string;
+  modTapHold: string;
+  modTapTap: string;
+  modTapDelay: string;
+  modTapApply: string;
+  modTapClear: string;
+  modTapScan: string;
+  modTapNoneSelected: string;
+  modTapNotAssigned: string;
+  modTapAssigned: string;
+  modTapNoOutput: string;
+  modTapNote: string;
+  modTapClearNote: string;
+
   selection: string;
   selectNone: string;
   selected: string;
   key: string;
+  noKeysSelected: string;
   mode: string;
   modeGlobal: string;
   modeSingle: string;
@@ -49,6 +66,7 @@ interface Strings {
   resetSelected: string;
   resetAll: string;
   resetAllConfirm: string;
+  keyboardRangeNote: (min: string, max: string, step: string) => string;
 
   rapidTrigger: string;
   rapidHint: string;
@@ -70,8 +88,6 @@ interface Strings {
   releaseDeadzone: string;
   applyDeadzone: string;
 
-  delay: string;
-
   lighting: string;
   effect: string;
   effectName: string;
@@ -86,6 +102,10 @@ interface Strings {
   powered: string;
   superResponse: string;
   superResponseHint: string;
+  /** Lighting effect names, indexed by effect id 0..20. */
+  effectNames: readonly string[];
+  /** Sleep timer labels, keyed by minutes. */
+  sleepLabels: Readonly<Record<number, string>>;
 
   sensors: string;
   sensorsHint: string;
@@ -95,8 +115,10 @@ interface Strings {
   activeSensors: string;
   channels: string;
   peak: string;
+  peakReset: string;
   readout: string;
-
+  on: string;
+  off: string;
 
   system: string;
   pollingRate: string;
@@ -114,9 +136,14 @@ interface Strings {
   step: string;
   reload: string;
 
+  configTitle: string;
+  configHint: string;
+  configNote: string;
+  exportConfig: string;
+  importConfig: string;
+  importInvalid: string;
+  importDone: string;
 
-  saved: string;
-  failed: string;
   language: string;
   linking: string;
   deckHint: string;
@@ -125,13 +152,14 @@ interface Strings {
 const ru: Strings = {
   appTitle: "Панель управления",
   connected: "Подключена",
-  connecting: "Подключение…",
   disconnected: "Не найдена",
   reconnect: "Переподключить",
+  offlineBanner: "Клавиатура не подключена",
 
   navActuation: "Срабатывание",
   navRapid: "Rapid Trigger",
   navSnapTap: "Snap Tap",
+  navModTap: "Mod-Tap",
   navLighting: "Подсветка",
   navSensors: "Датчики",
   navSystem: "Система",
@@ -157,10 +185,28 @@ const ru: Strings = {
   snapTapUnavailableDetail:
     "Прошивка принимает и хранит пару, но включить переключение не удалось: поля mode и type не расшифрованы. Две записанные конфигурации либо оставляли клавиши без вывода, либо игнорировались. Поэтому запись отключена — значение наугад может сделать клавиши нерабочими. Чтение и сброс работают: если пара уже записана, её можно отключить здесь.",
 
+  modTapTitle: "Mod-Tap",
+  modTapHint: "Короткое нажатие выдаёт одну клавишу, удержание дольше порога — другую",
+  modTapHold: "Клавиша удержания",
+  modTapTap: "Клавиша тапа",
+  modTapDelay: "Порог удержания",
+  modTapApply: "Применить",
+  modTapClear: "Убрать назначение",
+  modTapScan: "Найти назначения на клавиатуре",
+  modTapNoneSelected: "Выберите клавишу на схеме сверху",
+  modTapNotAssigned: "Назначения нет",
+  modTapAssigned: "Текущие назначения",
+  modTapNoOutput: "— не задано —",
+  modTapNote:
+    "Семантика подтверждена кадрами драйвера производителя и проверена на клавиатуре: первый слот — вывод при удержании, второй — при коротком нажатии. Порог хранится в прошивке шагами по 10 мс. Назначение переводит клавишу в режим расширенной клавиши.",
+  modTapClearNote:
+    "Сброс убирает назначение и снимает флаг расширенной клавиши, сохраняя обычный режим клавиши.",
+
   selection: "Выбор клавиш",
   selectNone: "Снять всё",
   selected: "выбрано",
   key: "Клавиша",
+  noKeysSelected: "Клавиши не выбраны",
   mode: "Режим",
   modeGlobal: "Глобальный",
   modeSingle: "Своя точка",
@@ -174,6 +220,8 @@ const ru: Strings = {
   resetSelected: "Вернуть к глобальной",
   resetAll: "Сбросить все клавиши",
   resetAllConfirm: "Сбросить все 68 клавиш к глобальному режиму?",
+  keyboardRangeNote: (min, max, step) =>
+    `Диапазон клавиатуры: ${min} – ${max} мм, шаг ${step} мм`,
 
   rapidTrigger: "Rapid Trigger",
   rapidHint: "Мгновенный отпуск при обратном ходе пальца",
@@ -197,8 +245,6 @@ const ru: Strings = {
   releaseDeadzone: "Зона отпускания",
   applyDeadzone: "Применить мёртвые зоны",
 
-  delay: "Задержка сброса",
-
   lighting: "Подсветка",
   effect: "Режим",
   effectName: "Эффект",
@@ -215,6 +261,40 @@ const ru: Strings = {
   superResponse: "Super Response",
   superResponseHint: "Повышенное разрешение датчиков 0.02 мм",
 
+  effectNames: [
+    "Статичный",
+    "Радуга",
+    "Дыхание",
+    "Реактивный",
+    "Волна",
+    "Рябь",
+    "Спектр",
+    "Бегущая строка",
+    "Радужная волна",
+    "Ambient",
+    "Искры",
+    "Звёздный свет",
+    "Градиент",
+    "Пульс",
+    "Цикл",
+    "Поиск",
+    "Undertow",
+    "Мороз",
+    "Огонь",
+    "Аврора",
+    "Океан",
+  ],
+  sleepLabels: {
+    0: "Никогда",
+    1: "1 мин",
+    3: "3 мин",
+    5: "5 мин",
+    10: "10 мин",
+    15: "15 мин",
+    30: "30 мин",
+    60: "60 мин",
+  },
+
   sensors: "Мониторинг датчиков",
   sensorsHint: "Живое значение хода штока по датчикам Холла",
   sensorsIdle: "Включите поток, чтобы увидеть ход штока в реальном времени.",
@@ -223,8 +303,10 @@ const ru: Strings = {
   activeSensors: "активных датчиков",
   channels: "каналов в матрице",
   peak: "Пик",
+  peakReset: "Сбросить пики",
   readout: "Показания",
-
+  on: "вкл",
+  off: "выкл",
 
   system: "Система",
   pollingRate: "Частота опроса",
@@ -243,9 +325,15 @@ const ru: Strings = {
   step: "Шаг",
   reload: "Перечитать настройки",
 
+  configTitle: "Конфигурация",
+  configHint: "Сохраните настройки в файл или загрузите их обратно",
+  configNote:
+    "В файл входят срабатывание, Rapid Trigger, мёртвые зоны, подсветка, частота опроса, профиль и раскладка ОС. Snap Tap и Mod-Tap не переносятся.",
+  exportConfig: "Сохранить в файл",
+  importConfig: "Загрузить из файла",
+  importInvalid: "Файл не похож на конфигурацию этой панели",
+  importDone: "Настройки применены",
 
-  saved: "Сохранено",
-  failed: "Ошибка",
   language: "Язык",
   linking: "Подключение…",
   deckHint: "Ctrl / Shift + клик — мультивыбор",
@@ -254,13 +342,14 @@ const ru: Strings = {
 const en: Strings = {
   appTitle: "Control Panel",
   connected: "Connected",
-  connecting: "Connecting…",
   disconnected: "Not found",
   reconnect: "Reconnect",
+  offlineBanner: "Keyboard not connected",
 
   navActuation: "Actuation",
   navRapid: "Rapid Trigger",
   navSnapTap: "Snap Tap",
+  navModTap: "Mod-Tap",
   navLighting: "Lighting",
   navSensors: "Sensors",
   navSystem: "System",
@@ -286,10 +375,28 @@ const en: Strings = {
   snapTapUnavailableDetail:
     "The firmware accepts and stores the pair, but switching could not be turned on: the mode and type fields are not understood. Two written configurations either left the keys emitting nothing or were ignored outright. Writing is therefore disabled, because a guessed value can make keys unusable. Reading and clearing work: if a pair is already stored, you can switch it off here.",
 
+  modTapTitle: "Mod-Tap",
+  modTapHint: "A short press outputs one key, holding past the threshold outputs another",
+  modTapHold: "Hold output",
+  modTapTap: "Tap output",
+  modTapDelay: "Hold threshold",
+  modTapApply: "Apply",
+  modTapClear: "Remove assignment",
+  modTapScan: "Find assignments on the keyboard",
+  modTapNoneSelected: "Pick a key in the diagram above",
+  modTapNotAssigned: "No assignment",
+  modTapAssigned: "Current assignments",
+  modTapNoOutput: "— none —",
+  modTapNote:
+    "Semantics confirmed against the vendor driver's own frames and on the board: the first slot is the hold output, the second is the tap output. The firmware stores the threshold in 10 ms steps. Assigning flags the key as an advanced key.",
+  modTapClearNote:
+    "Removing the assignment also clears the advanced-key flag and keeps the key's ordinary mode.",
+
   selection: "Key selection",
   selectNone: "Clear",
   selected: "selected",
   key: "Key",
+  noKeysSelected: "No keys selected",
   mode: "Mode",
   modeGlobal: "Global",
   modeSingle: "Custom point",
@@ -303,6 +410,8 @@ const en: Strings = {
   resetSelected: "Back to global",
   resetAll: "Reset every key",
   resetAllConfirm: "Reset all 68 keys to global mode?",
+  keyboardRangeNote: (min, max, step) =>
+    `Keyboard range: ${min} – ${max} mm, step ${step} mm`,
 
   rapidTrigger: "Rapid Trigger",
   rapidHint: "Instant reset when the finger reverses direction",
@@ -325,8 +434,6 @@ const en: Strings = {
   releaseDeadzone: "Release deadzone",
   applyDeadzone: "Apply deadzones",
 
-  delay: "Задержка сброса",
-
   lighting: "Lighting",
   effect: "Mode",
   effectName: "Effect",
@@ -342,6 +449,40 @@ const en: Strings = {
   superResponse: "Super Response",
   superResponseHint: "Elevated sensor resolution down to 0.02 mm",
 
+  effectNames: [
+    "Static",
+    "Rainbow",
+    "Breathing",
+    "Reactive",
+    "Wave",
+    "Ripple",
+    "Spectrum",
+    "Marquee",
+    "Rainbow Wave",
+    "Ambient",
+    "Spark",
+    "Starlight",
+    "Gradient",
+    "Pulse",
+    "Cycle",
+    "Search",
+    "Undertow",
+    "Frost",
+    "Fire",
+    "Aurora",
+    "Ocean",
+  ],
+  sleepLabels: {
+    0: "Never",
+    1: "1 min",
+    3: "3 min",
+    5: "5 min",
+    10: "10 min",
+    15: "15 min",
+    30: "30 min",
+    60: "60 min",
+  },
+
   sensors: "Sensor monitor",
   sensorsHint: "Live stem travel measured by the Hall sensors",
   sensorsIdle: "Turn the stream on to watch the stems move in real time.",
@@ -350,8 +491,10 @@ const en: Strings = {
   activeSensors: "active sensors",
   channels: "channels in the matrix",
   peak: "Peak",
+  peakReset: "Reset peaks",
   readout: "Readout",
-
+  on: "ON",
+  off: "OFF",
 
   system: "System",
   pollingRate: "Polling rate",
@@ -370,9 +513,15 @@ const en: Strings = {
   step: "Step",
   reload: "Reload settings",
 
+  configTitle: "Configuration",
+  configHint: "Save the settings to a file or load them back",
+  configNote:
+    "The file covers actuation, Rapid Trigger, deadzones, lighting, polling rate, profile and OS layout. Snap Tap and Mod-Tap assignments are not included.",
+  exportConfig: "Export to file",
+  importConfig: "Import from file",
+  importInvalid: "That does not look like a configuration file from this panel",
+  importDone: "Configuration applied",
 
-  saved: "Saved",
-  failed: "Error",
   language: "Language",
   linking: "Connecting…",
   deckHint: "Ctrl / Shift + click to multi-select",

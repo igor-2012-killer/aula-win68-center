@@ -8,7 +8,7 @@ interface Props {
   state: KeyboardState;
   lang: Lang;
   selection: number[];
-  run: (label: string, task: () => Promise<unknown>) => Promise<void>;
+  run: (task: () => Promise<unknown>) => Promise<boolean>;
 }
 
 export function RapidTab({ state, lang, selection, run }: Props) {
@@ -19,9 +19,10 @@ export function RapidTab({ state, lang, selection, run }: Props) {
 
   const first = none ? undefined : state.keys[selection[0]!];
 
-  // Adopt the leading selected key's sensitivities whenever the selection
-  // changes, including the very first render after a state refresh.
-  const signature = selection.join(",");
+  // Adopt the leading selected key's sensitivities whenever the selection or
+  // the stored values change — the values too, otherwise a profile switch or a
+  // refresh leaves the sliders showing stale numbers until the selection moves.
+  const signature = `${selection.join(",")}|${first?.rt_press ?? ""}/${first?.rt_release ?? ""}`;
   const [adopted, setAdopted] = useState(signature);
   const [press, setPress] = useState(first?.rt_press ?? 0.2);
   const [release, setRelease] = useState(first?.rt_release ?? 0.2);
@@ -34,7 +35,7 @@ export function RapidTab({ state, lang, selection, run }: Props) {
   const enabled = first?.mode === "rapidtrigger";
 
   const apply = (on: boolean, pressMm: number, releaseMm: number) =>
-    run(t.saved, () => api.setKeysRapidTrigger(ids, on, pressMm, releaseMm));
+    run(() => api.setKeysRapidTrigger(ids, on, pressMm, releaseMm));
 
   return (
     <div class="columns">
@@ -60,7 +61,7 @@ export function RapidTab({ state, lang, selection, run }: Props) {
           disabled={offline || none}
           onCommit={(value) => {
             setPress(value);
-            void apply(true, value, release);
+            return apply(true, value, release);
           }}
         />
         <Slider
@@ -73,7 +74,7 @@ export function RapidTab({ state, lang, selection, run }: Props) {
           disabled={offline || none}
           onCommit={(value) => {
             setRelease(value);
-            void apply(true, press, value);
+            return apply(true, press, value);
           }}
         />
       </Panel>

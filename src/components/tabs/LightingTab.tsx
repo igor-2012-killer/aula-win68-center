@@ -1,12 +1,12 @@
-﻿import { STRINGS, type Lang } from "../../i18n";
+import { STRINGS, type Lang } from "../../i18n";
 import { api } from "../../ipc";
 import { LIGHT_EFFECTS, SLEEP_OPTIONS, type KeyboardState, type Lighting } from "../../types";
-import { Panel, Row, Segmented, Slider, Toggle } from "../ui";
+import { Panel, Row, Segmented, Select, Slider, Toggle } from "../ui";
 
 interface Props {
   state: KeyboardState;
   lang: Lang;
-  run: (label: string, task: () => Promise<unknown>) => Promise<void>;
+  run: (task: () => Promise<unknown>) => Promise<boolean>;
 }
 
 const SWATCHES = [
@@ -28,7 +28,7 @@ export function LightingTab({ state, lang, run }: Props) {
   const lighting = state.lighting;
 
   const apply = (patch: Partial<Lighting>) =>
-    run(t.saved, () => api.setLighting({ ...lighting, ...patch }));
+    run(() => api.setLighting({ ...lighting, ...patch }));
 
   const setColor = (index: number, color: string) => {
     const colors = [...lighting.colors] as Lighting["colors"];
@@ -64,20 +64,12 @@ export function LightingTab({ state, lang, run }: Props) {
         </Row>
 
         <Row label={t.effectName}>
-          <div class="select">
-            <select
-              value={lighting.effect}
-              disabled={offline}
-              onChange={(e) => void apply({ effect: Number((e.currentTarget as HTMLSelectElement).value) })}
-            >
-              {LIGHT_EFFECTS.map(([value, name]) => (
-                <option key={value} value={value}>
-                  {value}. {name}
-                </option>
-              ))}
-            </select>
-            <span class="select__chevron" aria-hidden="true" />
-          </div>
+          <Select
+            value={lighting.effect}
+            options={LIGHT_EFFECTS.map(([value]) => [value, `${value}. ${t.effectNames[value] ?? value}`] as const)}
+            disabled={offline}
+            onChange={(effect) => void apply({ effect })}
+          />
         </Row>
 
         <Slider
@@ -89,7 +81,7 @@ export function LightingTab({ state, lang, run }: Props) {
           unit=""
           digits={0}
           disabled={offline}
-          onCommit={(brightness) => void apply({ brightness })}
+          onCommit={(brightness) => apply({ brightness })}
         />
         <Slider
           label={t.speed}
@@ -100,7 +92,7 @@ export function LightingTab({ state, lang, run }: Props) {
           unit=""
           digits={0}
           disabled={offline}
-          onCommit={(speed) => void apply({ speed })}
+          onCommit={(speed) => apply({ speed })}
         />
         <Row label={t.direction}>
           <Segmented
@@ -114,22 +106,15 @@ export function LightingTab({ state, lang, run }: Props) {
           />
         </Row>
         <Row label={t.sleepTimer}>
-          <div class="select">
-            <select
-              value={lighting.sleep_minutes}
-              disabled={offline}
-              onChange={(e) =>
-                void apply({ sleep_minutes: Number((e.currentTarget as HTMLSelectElement).value) })
-              }
-            >
-              {SLEEP_OPTIONS.map(([value, name]) => (
-                <option key={value} value={value}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <span class="select__chevron" aria-hidden="true" />
-          </div>
+          <Select
+            value={lighting.sleep_minutes}
+            options={SLEEP_OPTIONS.map(([value]) => [
+              value,
+              t.sleepLabels[value] ?? `${value} min`,
+            ] as const)}
+            disabled={offline}
+            onChange={(sleep_minutes) => void apply({ sleep_minutes })}
+          />
         </Row>
         <Toggle
           label={t.superResponse}
@@ -163,6 +148,7 @@ export function LightingTab({ state, lang, run }: Props) {
                 class="palette__picker"
                 value={color}
                 disabled={offline}
+                aria-label={`${t.palette} ${index + 1}`}
                 onChange={(e) => setColor(index, (e.currentTarget as HTMLInputElement).value)}
               />
             </div>

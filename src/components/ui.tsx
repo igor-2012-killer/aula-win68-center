@@ -14,7 +14,12 @@ interface SliderProps {
   hint?: string;
   disabled?: boolean;
   accent?: "primary" | "rose" | "amber" | "emerald";
-  onCommit: (value: number) => void;
+  /**
+   * Commit a value to the keyboard. Return (or resolve to) `false` when the
+   * keyboard refused it, and the slider rolls the draft back to `value`
+   * instead of displaying a number the hardware does not hold.
+   */
+  onCommit: (value: number) => boolean | Promise<boolean> | void;
 }
 
 export function Slider({
@@ -32,15 +37,42 @@ export function Slider({
 }: SliderProps) {
   const [draft, setDraft] = useState(value);
   const dragging = useRef(false);
+  const keyTimer = useRef<number | null>(null);
 
   // Follow external changes unless the user is actively dragging.
   useEffect(() => {
     if (!dragging.current) setDraft(value);
   }, [value]);
 
+  useEffect(
+    () => () => {
+      if (keyTimer.current != null) clearTimeout(keyTimer.current);
+    },
+    [],
+  );
+
   const commit = (next: number) => {
     setDraft(next);
-    onCommit(next);
+    const outcome = onCommit(next) as boolean | Promise<boolean> | undefined;
+    if (outcome instanceof Promise) {
+      void outcome.then((ok) => {
+        if (ok === false) setDraft(value);
+      });
+    } else if (outcome === false) {
+      setDraft(value);
+    }
+  };
+
+  // Arrow keys on a range input fire one `change` per press and repeat while
+  // held, which would put one HID write per step on the wire. Adjust the
+  // draft instead and commit once the key pauses.
+  const commitSoon = (next: number) => {
+    setDraft(next);
+    if (keyTimer.current != null) clearTimeout(keyTimer.current);
+    keyTimer.current = window.setTimeout(() => {
+      keyTimer.current = null;
+      onCommit(next);
+    }, 300);
   };
 
   const fill = max > min ? ((draft - min) / (max - min)) * 100 : 0;
@@ -65,11 +97,30 @@ export function Slider({
         value={draft}
         disabled={disabled}
         style={{ "--fill": `${fill}%` }}
+        aria-valuetext={`${draft.toFixed(digits)}${unit ? ` ${unit}` : ""}`}
         onPointerDown={() => {
           dragging.current = true;
         }}
         onPointerUp={() => {
           dragging.current = false;
+        }}
+        onPointerCancel={() => {
+          dragging.current = false;
+          setDraft(value);
+        }}
+        onKeyDown={(e) => {
+          const el = e.currentTarget as HTMLInputElement;
+          const stepValue = Number(el.step) || step;
+          let next: number | null = null;
+          if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+            next = Math.min(max, Number(el.value) + stepValue);
+          } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+            next = Math.max(min, Number(el.value) - stepValue);
+          }
+          if (next != null) {
+            e.preventDefault();
+            commitSoon(next);
+          }
         }}
         onInput={(e) => setDraft(Number((e.currentTarget as HTMLInputElement).value))}
         onChange={(e) => commit(Number((e.currentTarget as HTMLInputElement).value))}

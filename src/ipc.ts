@@ -1,6 +1,6 @@
-﻿import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { KeyboardState, Lighting, SnapTap } from "./types";
+import type { KeyboardState, Lighting, ModTapAssignment, SnapTap } from "./types";
 
 export const EVT_STATE = "kb://state";
 export const EVT_TRAVEL = "kb://travel";
@@ -10,12 +10,24 @@ export const EVT_STATUS = "kb://status";
 const TIMEOUT_MS = 8000;
 
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  return Promise.race([
-    invoke<T>(command, args),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${command}: timed out`)), TIMEOUT_MS),
-    ),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    // The timer must be cleared when invoke settles, otherwise every call
+    // leaves a pending 8 s rejection behind it.
+    const timer = setTimeout(
+      () => reject(new Error(`${command}: timed out`)),
+      TIMEOUT_MS,
+    );
+    invoke<T>(command, args).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
 }
 
 export const api = {
@@ -34,6 +46,11 @@ export const api = {
 
   setSnapTap: (pair: SnapTap) => call<void>("set_snap_tap", { pair }),
   clearSnapTap: () => call<void>("clear_snap_tap"),
+
+  listModTap: () => call<ModTapAssignment[]>("list_mod_tap"),
+  scanModTap: (keyIds: number[]) => call<void>("scan_mod_tap", { keyIds }),
+  setModTap: (assignment: ModTapAssignment) => call<void>("set_mod_tap", { assignment }),
+  clearModTap: (keyId: number) => call<void>("clear_mod_tap", { keyId }),
 
   setLighting: (config: Lighting) => call<void>("set_lighting", { config }),
 
