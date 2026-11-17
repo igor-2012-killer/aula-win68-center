@@ -72,7 +72,7 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
   probe:
-    name: Protocol tool builds standalone
+    name: Probe (build + test + clippy + fmt)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,14 +84,30 @@ jobs:
           sudo apt-get install -y --no-install-recommends libudev-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: tools/probe -> target
 
+      - name: Unit tests
+        # No hardware. The probe's own tests drive a closed Link, and the
+        # protocol/hid/keymap suites included by path are the same pure tests
+        # the backend job runs.
+        run: cargo test --manifest-path tools/probe/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy --manifest-path tools/probe/Cargo.toml --all-targets -- -D warnings
+
+      - name: Format check
+        # No `--all`: the crate is not a workspace root, and cargo now warns on it.
+        run: cargo fmt --manifest-path tools/probe/Cargo.toml -- --check
+
       # The probe includes protocol.rs / hid.rs / keymap.rs by source path, so
-      # it catches those modules drifting away from the app.
-      - run: cargo build --manifest-path tools/probe/Cargo.toml --release
+      # a release build catches those modules drifting away from the app.
+      - name: Release build
+        run: cargo build --manifest-path tools/probe/Cargo.toml --release
 
   windows:
     name: Windows app build
