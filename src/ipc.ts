@@ -1,23 +1,35 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { KeyboardState, Lighting, ModTapAssignment, SnapTap } from "./types";
+import {
+  EVENT_STATE,
+  EVENT_STATUS,
+  EVENT_TRAVEL,
+  type IpcCommands,
+  type IpcEvents,
+} from "./generated/ipc";
 
-export const EVT_STATE = "kb://state";
-export const EVT_TRAVEL = "kb://travel";
-export const EVT_STATUS = "kb://status";
+export const EVT_STATE = EVENT_STATE;
+export const EVT_TRAVEL = EVENT_TRAVEL;
+export const EVT_STATUS = EVENT_STATUS;
 
 /** Backend rejects work after this long; fail fast so the UI never hangs. */
 const TIMEOUT_MS = 8000;
 
-function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
+type CommandArgs<K extends keyof IpcCommands> = IpcCommands[K]["args"];
+
+function call<K extends keyof IpcCommands>(
+  command: K,
+  ...rest: CommandArgs<K> extends undefined ? [] : [args: CommandArgs<K>]
+): Promise<IpcCommands[K]["result"]> {
+  const args = rest[0] as Record<string, unknown> | undefined;
+  return new Promise((resolve, reject) => {
     // The timer must be cleared when invoke settles, otherwise every call
     // leaves a pending 8 s rejection behind it.
     const timer = setTimeout(
       () => reject(new Error(`${command}: timed out`)),
       TIMEOUT_MS,
     );
-    invoke<T>(command, args).then(
+    invoke<IpcCommands[K]["result"]>(command, args).then(
       (value) => {
         clearTimeout(timer);
         resolve(value);
@@ -30,44 +42,72 @@ function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   });
 }
 
+const commands = {
+  get_state: () => call("get_state"),
+  refresh: () => call("refresh"),
+  reconnect: () => call("reconnect"),
+  set_global_actuation: (mm: number) => call("set_global_actuation", { mm }),
+  set_keys_actuation: (keyIds: number[], mm: number) =>
+    call("set_keys_actuation", { keyIds, mm }),
+  set_keys_rapid_trigger: (
+    keyIds: number[],
+    on: boolean,
+    pressMm: number,
+    releaseMm: number,
+  ) => call("set_keys_rapid_trigger", { keyIds, on, pressMm, releaseMm }),
+  set_keys_deadzone: (keyIds: number[], pressMm: number, releaseMm: number) =>
+    call("set_keys_deadzone", { keyIds, pressMm, releaseMm }),
+  reset_keys: (keyIds: number[]) => call("reset_keys", { keyIds }),
+  set_snap_tap: (pair: CommandArgs<"set_snap_tap">["pair"]) => call("set_snap_tap", { pair }),
+  clear_snap_tap: () => call("clear_snap_tap"),
+  list_mod_tap: () => call("list_mod_tap"),
+  scan_mod_tap: (keyIds: number[]) => call("scan_mod_tap", { keyIds }),
+  set_mod_tap: (assignment: CommandArgs<"set_mod_tap">["assignment"]) =>
+    call("set_mod_tap", { assignment }),
+  clear_mod_tap: (keyId: number) => call("clear_mod_tap", { keyId }),
+  set_lighting: (config: CommandArgs<"set_lighting">["config"]) => call("set_lighting", { config }),
+  set_polling_rate: (index: number) => call("set_polling_rate", { index }),
+  set_profile: (index: number) => call("set_profile", { index }),
+  set_os_mode: (mac: boolean) => call("set_os_mode", { mac }),
+  set_streaming: (on: boolean) => call("set_streaming", { on }),
+  key_name: (id: number) => call("key_name", { id }),
+} satisfies { [K in keyof IpcCommands]: unknown };
+
 export const api = {
-  getState: () => call<KeyboardState>("get_state"),
-  refresh: () => call<void>("refresh"),
-  reconnect: () => call<void>("reconnect"),
-
-  setGlobalActuation: (mm: number) => call<void>("set_global_actuation", { mm }),
-  setKeysActuation: (keyIds: number[], mm: number) =>
-    call<void>("set_keys_actuation", { keyIds, mm }),
-  setKeysRapidTrigger: (keyIds: number[], on: boolean, pressMm: number, releaseMm: number) =>
-    call<void>("set_keys_rapid_trigger", { keyIds, on, pressMm, releaseMm }),
-  setKeysDeadzone: (keyIds: number[], pressMm: number, releaseMm: number) =>
-    call<void>("set_keys_deadzone", { keyIds, pressMm, releaseMm }),
-  resetKeys: (keyIds: number[]) => call<void>("reset_keys", { keyIds }),
-
-  setSnapTap: (pair: SnapTap) => call<void>("set_snap_tap", { pair }),
-  clearSnapTap: () => call<void>("clear_snap_tap"),
-
-  listModTap: () => call<ModTapAssignment[]>("list_mod_tap"),
-  scanModTap: (keyIds: number[]) => call<void>("scan_mod_tap", { keyIds }),
-  setModTap: (assignment: ModTapAssignment) => call<void>("set_mod_tap", { assignment }),
-  clearModTap: (keyId: number) => call<void>("clear_mod_tap", { keyId }),
-
-  setLighting: (config: Lighting) => call<void>("set_lighting", { config }),
-
-  setPollingRate: (index: number) => call<void>("set_polling_rate", { index }),
-  setProfile: (index: number) => call<void>("set_profile", { index }),
-  setOsMode: (mac: boolean) => call<void>("set_os_mode", { mac }),
-  setStreaming: (on: boolean) => call<void>("set_streaming", { on }),
+  getState: commands.get_state,
+  refresh: commands.refresh,
+  reconnect: commands.reconnect,
+  setGlobalActuation: commands.set_global_actuation,
+  setKeysActuation: commands.set_keys_actuation,
+  setKeysRapidTrigger: commands.set_keys_rapid_trigger,
+  setKeysDeadzone: commands.set_keys_deadzone,
+  resetKeys: commands.reset_keys,
+  setSnapTap: commands.set_snap_tap,
+  clearSnapTap: commands.clear_snap_tap,
+  listModTap: commands.list_mod_tap,
+  scanModTap: commands.scan_mod_tap,
+  setModTap: commands.set_mod_tap,
+  clearModTap: commands.clear_mod_tap,
+  setLighting: commands.set_lighting,
+  setPollingRate: commands.set_polling_rate,
+  setProfile: commands.set_profile,
+  setOsMode: commands.set_os_mode,
+  setStreaming: commands.set_streaming,
+  keyName: commands.key_name,
 };
 
-export function onState(cb: (state: KeyboardState) => void): Promise<UnlistenFn> {
-  return listen<KeyboardState>(EVT_STATE, (event) => cb(event.payload));
+export function onState(cb: (state: IpcEvents[typeof EVENT_STATE]) => void): Promise<UnlistenFn> {
+  return listen<IpcEvents[typeof EVENT_STATE]>(EVENT_STATE, (event) => cb(event.payload));
 }
 
-export function onTravel(cb: (microns: number[]) => void): Promise<UnlistenFn> {
-  return listen<number[]>(EVT_TRAVEL, (event) => cb(event.payload));
+export function onTravel(cb: (microns: IpcEvents[typeof EVENT_TRAVEL]) => void): Promise<UnlistenFn> {
+  return listen<IpcEvents[typeof EVENT_TRAVEL]>(EVENT_TRAVEL, (event) => cb(event.payload));
 }
 
-export function onStatus(cb: (kind: string, detail: string | null) => void): Promise<UnlistenFn> {
-  return listen<[string, string | null]>(EVT_STATUS, (event) => cb(event.payload[0], event.payload[1]));
+export function onStatus(
+  cb: (kind: IpcEvents[typeof EVENT_STATUS][0], detail: IpcEvents[typeof EVENT_STATUS][1]) => void,
+): Promise<UnlistenFn> {
+  return listen<IpcEvents[typeof EVENT_STATUS]>(EVENT_STATUS, (event) => {
+    cb(event.payload[0], event.payload[1]);
+  });
 }

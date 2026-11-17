@@ -186,7 +186,8 @@ cargo run --manifest-path tools/probe/Cargo.toml --release -- travel
 │   ├── app.tsx              оболочка: заголовок, вкладки, схема клавиатуры
 │   ├── store.ts             состояние, тосты, выбор клавиш
 │   ├── ipc.ts               типизированные вызовы и подписки на события
-│   ├── types.ts             зеркало src-tauri/src/state.rs
+│   ├── types.ts             константы UI; IPC-типы из generated/ipc.ts
+│   ├── generated/ipc.ts     сгенерировано из IPC-поверхности Rust
 │   ├── i18n.ts              строки RU / EN
 │   └── components/
 │       ├── Keyboard.tsx     интерактивная схема 68 клавиш

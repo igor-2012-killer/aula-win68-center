@@ -181,7 +181,8 @@ immediately whether you have something we need.**
 │   ├── app.tsx              shell: title bar, tabs, keyboard deck
 │   ├── store.ts             state, toasts, key selection
 │   ├── ipc.ts               typed invoke wrappers + event subscriptions
-│   ├── types.ts             mirror of src-tauri/src/state.rs
+│   ├── types.ts             UI constants; IPC types from generated/ipc.ts
+│   ├── generated/ipc.ts     generated from the Rust IPC surface
 │   ├── i18n.ts              RU / EN strings
 │   └── components/
 │       ├── Keyboard.tsx     interactive 68-key diagram

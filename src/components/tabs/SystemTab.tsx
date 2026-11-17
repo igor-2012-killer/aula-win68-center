@@ -39,6 +39,7 @@ interface ExportedConfig {
 function buildConfig(state: KeyboardState): ExportedConfig {
   const keys: ExportedConfig["keys"] = {};
   for (const [id, settings] of Object.entries(state.keys)) {
+    if (!settings) continue;
     keys[id] = {
       actuation: settings.actuation,
       rt_press: settings.rt_press,

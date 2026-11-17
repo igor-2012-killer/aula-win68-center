@@ -135,7 +135,8 @@ src/
 ├── app.tsx       shell: title bar, tabs, keyboard deck
 ├── store.ts      state, toasts, key selection, event wiring
 ├── ipc.ts        typed invoke wrappers + event subscriptions
-├── types.ts      mirror of src-tauri/src/state.rs
+├── types.ts      UI constants; IPC types re-exported from generated/ipc.ts
+├── generated/ipc.ts  generated from the Rust IPC surface
 ├── i18n.ts       RU / EN strings
 └── components/
     ├── Keyboard.tsx   interactive 68-key diagram
@@ -143,9 +144,9 @@ src/
     └── tabs/
 ```
 
-`src/types.ts` duplicates the Rust state model on purpose — it is the IPC
-contract, and keeping it in one file on each side makes a mismatch obvious
-during review.
+`src/generated/ipc.ts` is generated from the Rust command signatures, event
+payloads, and state types. `cargo test` fails when the committed file is
+stale. `src/types.ts` re-exports those types and holds the UI constants.
 
 Sliders commit on release rather than on every pixel of drag, so dragging a
 slider across the track issues one HID write, not two hundred.

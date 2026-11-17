@@ -48,6 +48,18 @@ pub const EVENT_STATE: &str = "kb://state";
 pub const EVENT_TRAVEL: &str = "kb://travel";
 pub const EVENT_STATUS: &str = "kb://status";
 
+fn ipc_emit_state(app: &AppHandle, state: &KeyboardState) {
+    let _ = app.emit(EVENT_STATE, state);
+}
+
+fn ipc_emit_travel(app: &AppHandle, samples: &[u16]) {
+    let _ = app.emit(EVENT_TRAVEL, samples);
+}
+
+fn ipc_emit_status(app: &AppHandle, kind: &str, detail: Option<String>) {
+    let _ = app.emit(EVENT_STATUS, (kind, detail));
+}
+
 /// Reply channel for a job. Carries `Err` when the job could not be done, so
 /// the command surface never reports a save that never reached the keyboard.
 pub type Reply = Sender<Result<(), String>>;
@@ -657,7 +669,7 @@ impl Worker {
 
     fn emit_status(&self, kind: &str, detail: Option<String>) {
         if let Some(app) = self.app() {
-            let _ = app.emit(EVENT_STATUS, (kind, detail));
+            ipc_emit_status(&app, kind, detail);
         }
     }
 
@@ -665,7 +677,7 @@ impl Worker {
     pub fn publish(&self) {
         if let Some(app) = self.app() {
             let state = self.state.read().expect("state lock").clone();
-            let _ = app.emit(EVENT_STATE, state);
+            ipc_emit_state(&app, &state);
         }
     }
 
@@ -788,7 +800,8 @@ impl Worker {
                 self.stream_flag.store(on, Ordering::Relaxed);
                 if !on {
                     if let Some(app) = self.app() {
-                        let _ = app.emit(EVENT_TRAVEL, vec![0u16; SENSOR_COUNT]);
+                        let zeros = vec![0u16; SENSOR_COUNT];
+                        ipc_emit_travel(&app, &zeros);
                     }
                 }
                 let _ = reply.send(Ok(()));
@@ -1324,7 +1337,7 @@ impl Worker {
         }
 
         if let Some(app) = self.app() {
-            let _ = app.emit(EVENT_TRAVEL, &frame);
+            ipc_emit_travel(&app, &frame);
         }
     }
 }
