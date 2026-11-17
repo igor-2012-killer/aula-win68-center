@@ -193,3 +193,8 @@ jobs:
             echo "Broken relative links found."
           fi
           exit "$fail"
+
+      # READMEs in both languages, no Python, range inputs only inside Slider,
+      # and LF in the git index. Failure text names the AGENTS.md rule and the fix.
+      - name: AGENTS.md repository rules
+        run: bash tools/check-repo-rules.sh
