@@ -43,6 +43,67 @@ const RED: &str = "\x1b[31m";
 const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 
+#[derive(Debug, PartialEq, Eq)]
+enum Run {
+    Done,
+    Failed,
+}
+
+impl Run {
+    fn code(self) -> ExitCode {
+        match self {
+            Run::Done => ExitCode::SUCCESS,
+            Run::Failed => ExitCode::FAILURE,
+        }
+    }
+}
+
+fn finish(result: Result<Run, p::ForbiddenCommand>) -> Run {
+    match result {
+        Ok(run) => run,
+        Err(err) => {
+            eprintln!("{RED}{err}{RESET}");
+            Run::Failed
+        }
+    }
+}
+
+fn transmit(link: &mut Link, packet: [u8; p::PACKET_LEN]) {
+    if let Err(err) = link.send(packet) {
+        eprintln!("{RED}{err}{RESET}");
+    }
+}
+
+fn ask(link: &mut Link, packet: [u8; p::PACKET_LEN]) -> Option<p::Response> {
+    match link.query(packet) {
+        Ok(reply) => reply,
+        Err(err) => {
+            eprintln!("{RED}{err}{RESET}");
+            None
+        }
+    }
+}
+
+fn ask_order(link: &mut Link, cmd: u8) -> Option<p::Response> {
+    match link.query_order(cmd) {
+        Ok(reply) => reply,
+        Err(err) => {
+            eprintln!("{RED}{err}{RESET}");
+            None
+        }
+    }
+}
+
+fn ask_multi(link: &mut Link, packet: [u8; p::PACKET_LEN], want: usize) -> Option<Vec<u8>> {
+    match link.query_multi(packet, want) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("{RED}{err}{RESET}");
+            None
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
@@ -81,21 +142,21 @@ fn main() -> ExitCode {
     let result = match positional[0] {
         "devices" => cmd_devices(&mut api),
         "state" => cmd_state(&mut link),
-        "raw" => cmd_raw(&mut link, &positional[1..]),
-        "query" => cmd_query(&mut link, &positional[1..]),
+        "raw" => finish(cmd_raw(&mut link, &positional[1..])),
+        "query" => finish(cmd_query(&mut link, &positional[1..])),
         "scan" => cmd_scan(&mut api, &mut link, &positional[1..]),
         "set" => cmd_set(&mut api, &mut link, &positional[1..], confirmed),
         "travel" => cmd_travel(&mut link),
-        "pair" => cmd_pair(&mut link, &positional[1..], confirmed),
+        "pair" => finish(cmd_pair(&mut link, &positional[1..], confirmed)),
         "layout" => cmd_layout(&mut link, &positional[1..]),
         "grid" => cmd_grid(&mut link),
         "modtap" => cmd_modtap(&mut link, &positional[1..], confirmed),
         other => {
             eprintln!("{RED}unknown command{RESET} {other:?} — try --help");
-            ExitCode::FAILURE
+            Run::Failed
         }
     };
-    result
+    result.code()
 }
 
 fn print_help() {
@@ -115,7 +176,7 @@ fn print_help() {
                                           sweep the command space
   {BOLD}travel{RESET}                           sample the live Hall-sensor matrix
   {BOLD}pair <snap|switch> <kA> <kB> [vA vB] [mode] [type] [delay] --yes{RESET}
-                                          read (or write) a Snap Tap / Rapid Switch pair
+                                          read (or write) a Snap Tap pair (`switch` is refused)
   {BOLD}layout <id> [ids]{RESET}                  read one per-key register across the keymap
   {BOLD}grid{RESET}                              live sensor grid, raw rows/cols, no labels
   {BOLD}modtap <key> [hold tap delayMs] --yes{RESET}
@@ -161,7 +222,7 @@ fn open_link<'a>(api: &'a mut HidApi, link: &'a mut Link) -> &'a mut Link {
 
 // ----------------------------------------------------------------- commands
 
-fn cmd_devices(api: &mut HidApi) -> ExitCode {
+fn cmd_devices(api: &mut HidApi) -> Run {
     let _ = api.refresh_devices();
     println!("{BOLD}HID collections for the keyboard{RESET}\n");
     let mut found = false;
@@ -189,19 +250,19 @@ fn cmd_devices(api: &mut HidApi) -> ExitCode {
     if !found {
         println!("  {DIM}no collections found{RESET}");
     }
-    ExitCode::SUCCESS
+    Run::Done
 }
 
-fn cmd_state(link: &mut Link) -> ExitCode {
+fn cmd_state(link: &mut Link) -> Run {
     println!("{BOLD}Keyboard state{RESET}\n");
 
-    if let Some(r) = link.query_order(p::order::QUERY_NAME) {
+    if let Some(r) = ask_order(link, p::order::QUERY_NAME) {
         println!("  name            {}", r.name());
     }
-    if let Some(r) = link.query_order(p::order::VERSION) {
+    if let Some(r) = ask_order(link, p::order::VERSION) {
         println!("  firmware        {}", r.firmware());
     }
-    if let Some(r) = link.query_order(p::order::QUERY_PRECISION) {
+    if let Some(r) = ask_order(link, p::order::QUERY_PRECISION) {
         let (step, min, max) = r.precision();
         println!(
             "  travel          {min}..{max} um, step {step} um  ({:.2}..{:.2} mm, step {:.2} mm)",
@@ -210,20 +271,20 @@ fn cmd_state(link: &mut Link) -> ExitCode {
             step as f32 / 1000.0
         );
     }
-    if let Some(r) = link.query_order(p::order::POLLING_RATE) {
+    if let Some(r) = ask_order(link, p::order::POLLING_RATE) {
         println!("  polling index   {}", r.value());
     }
-    if let Some(r) = link.query_order(p::order::PROFILE_ID) {
+    if let Some(r) = ask_order(link, p::order::PROFILE_ID) {
         println!("  profile         {}", r.value());
     }
-    if let Some(r) = link.query_order(p::order::QUERY_SYS_WIN) {
+    if let Some(r) = ask_order(link, p::order::QUERY_SYS_WIN) {
         println!(
             "  os layout       {}",
             if r.value() == 1 { "windows" } else { "macos" }
         );
     }
 
-    if let Some(r) = link.query(p::deadzone_packet(false, 0)) {
+    if let Some(r) = ask(link, p::deadzone_packet(false, 0)) {
         if r.matches(p::cmd::DEADZONE) {
             println!(
                 "  actuation       {} um ({:.2} mm)",
@@ -234,7 +295,7 @@ fn cmd_state(link: &mut Link) -> ExitCode {
     }
 
     let query = p::rgb_packet(false, &[[255, 0, 0]; 7], false, false, false, 0, 0, 0, 0, 0);
-    if let Some(r) = link.query(query) {
+    if let Some(r) = ask(link, query) {
         if r.matches(p::cmd::RGB) {
             let b = r.rgb_bitmap();
             println!(
@@ -276,7 +337,7 @@ fn cmd_state(link: &mut Link) -> ExitCode {
                     ..p::KeyPair::CLEARED
                 },
             );
-            if let Some(r) = link.query(probe) {
+            if let Some(r) = ask(link, probe) {
                 if !r.matches(p::cmd::SOCD) || r.is_fail() {
                     continue;
                 }
@@ -390,17 +451,17 @@ fn cmd_state(link: &mut Link) -> ExitCode {
         ids.len(),
         read_layout(link, p::layout::MODE, &ids).len() == ids.len()
     );
-    ExitCode::SUCCESS
+    Run::Done
 }
 
-fn cmd_raw(link: &mut Link, args: &[&str]) -> ExitCode {
+fn raw_packet(args: &[&str]) -> Result<[u8; p::PACKET_LEN], Run> {
     let Some(hex) = args.first() else {
         eprintln!("usage: aula-probe raw <64 hex chars>");
-        return ExitCode::FAILURE;
+        return Err(Run::Failed);
     };
     let Some(bytes) = decode_hex(hex) else {
         eprintln!("{RED}invalid hex{RESET}");
-        return ExitCode::FAILURE;
+        return Err(Run::Failed);
     };
     if bytes.len() != p::PACKET_LEN {
         eprintln!(
@@ -408,32 +469,39 @@ fn cmd_raw(link: &mut Link, args: &[&str]) -> ExitCode {
             p::PACKET_LEN,
             bytes.len()
         );
-        return ExitCode::FAILURE;
+        return Err(Run::Failed);
     }
     let mut packet = [0u8; p::PACKET_LEN];
     packet.copy_from_slice(&bytes);
+    Ok(packet)
+}
+
+fn cmd_raw(link: &mut Link, args: &[&str]) -> Result<Run, p::ForbiddenCommand> {
+    let packet = match raw_packet(args) {
+        Ok(packet) => packet,
+        Err(run) => return Ok(run),
+    };
     dump_packet("tx", &packet);
 
-    match link.query(packet) {
+    match link.query(packet)? {
         Some(r) => {
             dump_packet("rx", &r.0);
-            ExitCode::SUCCESS
+            Ok(Run::Done)
         }
         None => {
             println!("{DIM}no reply (the keyboard echoes nothing for writes){RESET}");
-            ExitCode::SUCCESS
+            Ok(Run::Done)
         }
     }
 }
 
-fn cmd_query(link: &mut Link, args: &[&str]) -> ExitCode {
+fn query_packet(args: &[&str]) -> Result<[u8; p::PACKET_LEN], Run> {
     let Some(id) = args.first().and_then(|s| s.parse::<u8>().ok()) else {
         eprintln!("usage: aula-probe query <id> [--space order|struct]");
-        return ExitCode::FAILURE;
+        return Err(Run::Failed);
     };
     let space = flag(args, "space").unwrap_or_else(|| "order".into());
-
-    let packet = if space == "struct" {
+    Ok(if space == "struct" {
         // Structured read: payload of `len` zero bytes, padded with 0xFF.
         let mut buf = [0u8; p::PACKET_LEN];
         buf[0] = p::HEADER;
@@ -453,23 +521,29 @@ fn cmd_query(link: &mut Link, args: &[&str]) -> ExitCode {
         buf
     } else {
         p::cmd_packet(id, None)
-    };
+    })
+}
 
+fn cmd_query(link: &mut Link, args: &[&str]) -> Result<Run, p::ForbiddenCommand> {
+    let packet = match query_packet(args) {
+        Ok(packet) => packet,
+        Err(run) => return Ok(run),
+    };
     dump_packet("tx", &packet);
-    match link.query(packet) {
+    match link.query(packet)? {
         Some(r) => {
             dump_packet("rx", &r.0);
             classify(&r);
-            ExitCode::SUCCESS
+            Ok(Run::Done)
         }
         None => {
             println!("{DIM}no reply{RESET}");
-            ExitCode::SUCCESS
+            Ok(Run::Done)
         }
     }
 }
 
-fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> ExitCode {
+fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> Run {
     let space = flag(args, "space").unwrap_or_else(|| "order".into());
     let from: u8 = flag(args, "from").and_then(|v| v.parse().ok()).unwrap_or(0);
     let to: u8 = flag(args, "to").and_then(|v| v.parse().ok()).unwrap_or(127);
@@ -487,16 +561,19 @@ fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> ExitCode {
             continue;
         }
         let link = open_link(api, link);
-        let packet = if space == "struct" {
-            struct_read(id)
-        } else {
-            p::cmd_packet(id, None)
-        };
-        let Some(r) = link.query(packet) else {
-            if verbose {
-                println!("  {id:>4}  {DIM}no reply{RESET}");
+        let packet = scan_packet(&space, id);
+        let r = match link.query(packet) {
+            Err(err) => {
+                println!("  {id:>4}  {RED}refused{RESET}  {err}");
+                continue;
             }
-            continue;
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                if verbose {
+                    println!("  {id:>4}  {DIM}no reply{RESET}");
+                }
+                continue;
+            }
         };
         // Structured commands answer with `id | 0x80`; single-value commands
         // answer with a bare `0x80` and echo the id in byte 5. Anything else is
@@ -519,10 +596,10 @@ fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> ExitCode {
             println!("  {id:>4}  {DIM}no reply{RESET}");
         }
     }
-    ExitCode::SUCCESS
+    Run::Done
 }
 
-fn cmd_travel(link: &mut Link) -> ExitCode {
+fn cmd_travel(link: &mut Link) -> Run {
     println!("{BOLD}Live Hall-sensor matrix{RESET} {DIM}(press keys while this runs){RESET}\n");
     for round in 0..10 {
         let mut row = String::new();
@@ -541,7 +618,7 @@ fn cmd_travel(link: &mut Link) -> ExitCode {
         }
         std::thread::sleep(std::time::Duration::from_millis(120));
     }
-    ExitCode::SUCCESS
+    Run::Done
 }
 
 /// Reads one per-key `layout` register across the whole keymap.
@@ -549,10 +626,10 @@ fn cmd_travel(link: &mut Link) -> ExitCode {
 /// The vendor's `KeyLayout` enum names several registers this project has never
 /// identified, so this takes a raw layout id and prints whatever comes back.
 /// `0xFFFF` means "the firmware has no data for this key".
-fn cmd_layout(link: &mut Link, args: &[&str]) -> ExitCode {
+fn cmd_layout(link: &mut Link, args: &[&str]) -> Run {
     let Some(layout) = args.first().and_then(|v| v.parse::<u8>().ok()) else {
         eprintln!("usage: aula-probe layout <id> [key ids...]");
-        return ExitCode::FAILURE;
+        return Run::Failed;
     };
     let ids = if args.len() > 1 {
         match parse_ids(Some(&args[1])) {
@@ -606,7 +683,7 @@ fn cmd_layout(link: &mut Link, args: &[&str]) -> ExitCode {
             println!("  {DIM}differs from {majority}: {}{RESET}", odd.join(" "));
         }
     }
-    ExitCode::SUCCESS
+    Run::Done
 }
 
 /// Prints the live sensor grid as raw row/col values, with no key labels.
@@ -615,11 +692,11 @@ fn cmd_layout(link: &mut Link, args: &[&str]) -> ExitCode {
 /// see which cell lights up, and compare it against what the keymap claims. A
 /// label-based view cannot detect a systematic off-by-one because it is wrong in
 /// exactly the same way.
-fn cmd_grid(link: &mut Link) -> ExitCode {
+fn cmd_grid(link: &mut Link) -> Run {
     println!("{BOLD}live sensor grid{RESET} {DIM}(mm, 6 rows x 21 cols, raw){RESET}\n");
     let mut grid = vec![f32::NAN; 6 * 21];
     for half in 1..=2u8 {
-        let Some(raw) = link.query_multi(p::realtime_travel_packet(half), 192) else {
+        let Some(raw) = ask_multi(link, p::realtime_travel_packet(half), 192) else {
             println!("{RED}half {half}: no reply{RESET}");
             continue;
         };
@@ -681,7 +758,7 @@ fn cmd_grid(link: &mut Link) -> ExitCode {
             println!("    {h}");
         }
     }
-    ExitCode::SUCCESS
+    Run::Done
 }
 
 /// Mod-Tap (command 36), using the vendor driver's `MTPack` frame.
@@ -691,10 +768,10 @@ fn cmd_grid(link: &mut Link) -> ExitCode {
 ///
 /// Read-only unless `--yes` is given.
 /// `aula-probe modtap <key> [hold_hid tap_hid delay_ms] [--yes]`.
-fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
+fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> Run {
     let Some(key) = args.first().and_then(|v| v.parse::<u8>().ok()) else {
         eprintln!("usage: aula-probe modtap <key> [hold_hid tap_hid delay_ms] [--yes]");
-        return ExitCode::FAILURE;
+        return Run::Failed;
     };
     let num = |i: usize| -> u16 { args.get(i).and_then(|v| v.parse().ok()).unwrap_or(0) };
     let tap = p::ModTap {
@@ -715,19 +792,19 @@ fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
 
     let packet = p::mod_tap_packet(writing, tap);
     dump_packet("tx", &packet);
-    let Some(reply) = link.query(packet) else {
+    let Some(reply) = ask(link, packet) else {
         println!("{DIM}no reply{RESET}");
-        return ExitCode::SUCCESS;
+        return Run::Done;
     };
     dump_packet("rx", &reply.0);
 
     if reply.is_fail() {
         println!("{RED}refused (0xFF){RESET}");
-        return ExitCode::SUCCESS;
+        return Run::Done;
     }
     if !reply.matches(p::cmd::MOD_TAP) {
         println!("{YELLOW}unexpected reply id 0x{:02x}{RESET}", reply.0[2]);
-        return ExitCode::SUCCESS;
+        return Run::Done;
     }
     match p::parse_mod_tap(&reply.0) {
         Some(got) => {
@@ -741,7 +818,7 @@ fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
         }
         None => println!("{YELLOW}reply too short to parse{RESET}"),
     }
-    ExitCode::SUCCESS
+    Run::Done
 }
 
 /// Snap Tap / Rapid Switch pair, using the dynamic-delay frame from the
@@ -754,65 +831,88 @@ fn cmd_modtap(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
 /// The earlier probe used a 5-byte, 8-bit-value frame; the firmware accepts it
 /// but silently discards it, which is why Snap Tap looked unimplemented. See
 /// `docs/VENDOR-DRIVER.md` §6.
-fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
+struct PairRequest {
+    cmd_id: u8,
+    writing: bool,
+    packet: [u8; p::PACKET_LEN],
+    pair: p::KeyPair,
+}
+
+fn pair_request(args: &[&str], confirmed: bool) -> Result<PairRequest, Run> {
     if args.len() < 3 {
         eprintln!(
             "usage: aula-probe pair <snap|switch> <kA> <kB> [vA vB] [mode] [type] [delay] --yes"
         );
-        return ExitCode::FAILURE;
+        return Err(Run::Failed);
     }
     let cmd_id = match args[0] {
         "snap" | "socd" => p::cmd::SOCD,
         "switch" | "rs" => p::cmd::RAPID_SWITCH,
         other => {
             eprintln!("unknown pair kind {other:?} — use `snap` or `switch`");
-            return ExitCode::FAILURE;
+            return Err(Run::Failed);
         }
     };
     let mut nums: Vec<u16> = Vec::new();
     for a in &args[1..] {
         match a.parse::<u16>() {
             Ok(v) => nums.push(v),
-            Err(_) => return usage("pair"),
+            Err(_) => return Err(usage("pair")),
         }
     }
-    let key_a = nums[0] as u8;
-    let key_b = nums[1] as u8;
-    let value_a = nums.get(2).copied().unwrap_or(0);
-    let value_b = nums.get(3).copied().unwrap_or(0);
-    let mode = nums.get(4).copied().unwrap_or(0) as u8;
-    let resolver = nums.get(5).copied().unwrap_or(0) as u8;
-    let delay = nums.get(6).copied().unwrap_or(0);
-    let writing = confirmed;
+    let pair = p::KeyPair {
+        key_a: nums[0] as u8,
+        key_b: nums[1] as u8,
+        value_a: nums.get(2).copied().unwrap_or(0),
+        value_b: nums.get(3).copied().unwrap_or(0),
+        mode: nums.get(4).copied().unwrap_or(0) as u8,
+        resolver: nums.get(5).copied().unwrap_or(0) as u8,
+        delay: nums.get(6).copied().unwrap_or(0),
+    };
+    Ok(PairRequest {
+        cmd_id,
+        writing: confirmed,
+        packet: p::pair_packet(confirmed, cmd_id, pair),
+        pair,
+    })
+}
+
+fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> Result<Run, p::ForbiddenCommand> {
+    let request = match pair_request(args, confirmed) {
+        Ok(request) => request,
+        Err(run) => return Ok(run),
+    };
+    let PairRequest {
+        cmd_id,
+        writing,
+        packet,
+        pair,
+    } = request;
 
     if writing {
         println!(
-            "{YELLOW}writing: keyA=0x{key_a:02x} keyB=0x{key_b:02x} vA={value_a} vB={value_b} \
-             mode={mode} resolver={resolver} delay={delay}{RESET}"
+            "{YELLOW}writing: keyA=0x{:02x} keyB=0x{:02x} vA={} vB={} \
+             mode={} resolver={} delay={}{RESET}",
+            pair.key_a,
+            pair.key_b,
+            pair.value_a,
+            pair.value_b,
+            pair.mode,
+            pair.resolver,
+            pair.delay
         );
     }
 
-    let pair = p::KeyPair {
-        key_a,
-        key_b,
-        value_a,
-        value_b,
-        mode,
-        resolver,
-        delay,
-    };
-    let packet = p::pair_packet(writing, cmd_id, pair);
     dump_packet("tx", &packet);
-
-    if let Some(reply) = link.query(packet) {
+    if let Some(reply) = link.query(packet)? {
         dump_packet("rx", &reply.0);
         if reply.is_fail() {
             println!("{RED}refused (0xFF){RESET}");
-            return ExitCode::SUCCESS;
+            return Ok(Run::Done);
         }
         if !reply.matches(cmd_id) {
             println!("{YELLOW}unexpected reply id{RESET}");
-            return ExitCode::SUCCESS;
+            return Ok(Run::Done);
         }
         if let Some(pair) = p::parse_pair(&reply.0) {
             println!("  keyA    0x{:02x}", pair.key_a);
@@ -833,7 +933,7 @@ fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
         std::thread::sleep(std::time::Duration::from_millis(10));
         let verify = p::pair_packet(false, cmd_id, p::KeyPair::CLEARED);
         println!("{DIM}verifying...{RESET}");
-        if let Some(r) = link.query(verify) {
+        if let Some(r) = link.query(verify)? {
             let v = &r.0;
             println!(
                 "  readback keyA=0x{:02x} keyB=0x{:02x} vA={} vB={} mode=0x{:02x} delay={}",
@@ -846,20 +946,20 @@ fn cmd_pair(link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
             );
         }
     }
-    ExitCode::SUCCESS
+    Ok(Run::Done)
 }
 
-fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) -> ExitCode {
+fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) -> Run {
     if args.is_empty() {
         eprintln!("usage: aula-probe set <what> <args...> --yes");
-        return ExitCode::FAILURE;
+        return Run::Failed;
     }
     if !confirmed {
         eprintln!(
             "{YELLOW}This writes to real hardware.{RESET}\n\
              Re-run with {BOLD}--yes{RESET} to confirm."
         );
-        return ExitCode::FAILURE;
+        return Run::Failed;
     }
 
     match args[0] {
@@ -895,8 +995,10 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                     // Rapid Trigger lives in the high nibble of the mode field.
                     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
                         let values = vec![(p::touch_mode::RAPID_TRIGGER as u16) << 4; chunk.len()];
-                        let _ =
-                            link.send(p::key_layout_packet(true, p::layout::MODE, chunk, &values));
+                        transmit(
+                            link,
+                            p::key_layout_packet(true, p::layout::MODE, chunk, &values),
+                        );
                     }
                 }
                 "deadzone" => {
@@ -926,8 +1028,10 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                 "reset" => {
                     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
                         let values = vec![0u16; chunk.len()];
-                        let _ =
-                            link.send(p::key_layout_packet(true, p::layout::MODE, chunk, &values));
+                        transmit(
+                            link,
+                            p::key_layout_packet(true, p::layout::MODE, chunk, &values),
+                        );
                     }
                 }
                 _ => unreachable!(),
@@ -937,7 +1041,7 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
             let Some(idx) = args.get(1).and_then(|v| v.parse::<u8>().ok()) else {
                 return usage("set polling <index>");
             };
-            let _ = link.send(p::cmd_packet(p::order::POLLING_RATE, Some(idx)));
+            transmit(link, p::cmd_packet(p::order::POLLING_RATE, Some(idx)));
             println!(
                 "{YELLOW}polling rate set to index {idx}; the USB interface will disappear for ~1s{RESET}"
             );
@@ -946,7 +1050,7 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
             let Some(idx) = args.get(1).and_then(|v| v.parse::<u8>().ok()) else {
                 return usage("set profile <0-3>");
             };
-            let _ = link.send(p::cmd_packet(p::order::PROFILE_ID, Some(idx)));
+            transmit(link, p::cmd_packet(p::order::PROFILE_ID, Some(idx)));
         }
         "os" => {
             let cmd = match args.get(1).copied() {
@@ -954,20 +1058,20 @@ fn cmd_set(api: &mut HidApi, link: &mut Link, args: &[&str], confirmed: bool) ->
                 Some("mac") => p::order::SET_SYS_MAC,
                 _ => return usage("set os <win|mac>"),
             };
-            let _ = link.send(p::cmd_packet(cmd, Some(1)));
+            transmit(link, p::cmd_packet(cmd, Some(1)));
         }
         other => return usage(other),
     }
 
     println!("{GREEN}done{RESET} — verify with {BOLD}aula-probe state{RESET}");
-    ExitCode::SUCCESS
+    Run::Done
 }
 
 // ------------------------------------------------------------------ helpers
 
-fn usage(what: &str) -> ExitCode {
+fn usage(what: &str) -> Run {
     eprintln!("usage: aula-probe {what} --yes");
-    ExitCode::FAILURE
+    Run::Failed
 }
 
 fn parse_ids(arg: Option<&&str>) -> Option<Vec<u16>> {
@@ -1053,7 +1157,7 @@ fn read_layout(link: &mut Link, layout_id: u8, ids: &[u16]) -> std::collections:
     let mut out = std::collections::HashMap::new();
     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
         let zeros = vec![0u16; chunk.len()];
-        let Some(r) = link.query(p::key_layout_packet(false, layout_id, chunk, &zeros)) else {
+        let Some(r) = ask(link, p::key_layout_packet(false, layout_id, chunk, &zeros)) else {
             continue;
         };
         if !r.matches(p::cmd::KEY_LAYOUT) {
@@ -1067,10 +1171,10 @@ fn read_layout(link: &mut Link, layout_id: u8, ids: &[u16]) -> std::collections:
 }
 
 fn write_actuation(link: &mut Link, mm: f32) {
-    let _ = link.send(p::deadzone_packet(
-        true,
-        (mm.clamp(0.0, 65.535) * 1000.0) as u16,
-    ));
+    transmit(
+        link,
+        p::deadzone_packet(true, (mm.clamp(0.0, 65.535) * 1000.0) as u16),
+    );
 }
 
 /// Writes one value to a per-key `layout` register for every id.
@@ -1083,19 +1187,27 @@ fn write_keys(link: &mut Link, ids: &[u16], layout_id: u8, value_mm: f32) {
     let um = (value_mm.clamp(0.0, 65.535) * 1000.0) as u16;
     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
         let values = vec![um; chunk.len()];
-        let _ = link.send(p::key_layout_packet(true, layout_id, chunk, &values));
+        transmit(link, p::key_layout_packet(true, layout_id, chunk, &values));
     }
 }
 
 fn read_cell(link: &mut Link, index: usize) -> Option<f32> {
     let half = if index / 21 < 3 { 1 } else { 2 };
-    let raw = link.query_multi(p::realtime_travel_packet(half), 192)?;
+    let raw = ask_multi(link, p::realtime_travel_packet(half), 192)?;
     let value_index = if half == 1 { index - 21 } else { index - 63 };
     let at = 6 + value_index * 2;
     if at + 1 >= raw.len() {
         return None;
     }
     Some(u16::from_le_bytes([raw[at], raw[at + 1]]) as f32 / 1000.0)
+}
+
+fn scan_packet(space: &str, id: u8) -> [u8; p::PACKET_LEN] {
+    if space == "struct" {
+        struct_read(id)
+    } else {
+        p::cmd_packet(id, None)
+    }
 }
 
 fn struct_read(id: u8) -> [u8; p::PACKET_LEN] {
@@ -1125,4 +1237,112 @@ fn socd_read() -> [u8; p::PACKET_LEN] {
     sum += buf[9] as u32;
     buf[3] = (sum & 0xFF) as u8;
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex_of(packet: &[u8]) -> String {
+        packet.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn assert_refused(err: p::ForbiddenCommand, id: u8) {
+        assert_eq!(err.id, id);
+        let message = err.to_string();
+        assert!(message.contains(&format!("command {id}")), "{message}");
+        assert!(message.contains("forbidden list"), "{message}");
+        assert!(message.contains("AGENTS.md"), "{message}");
+        assert!(message.contains("must not be relaxed"), "{message}");
+    }
+
+    #[test]
+    fn raw_parsing_rejects_forbidden_commands() {
+        let mut link = Link::default();
+        for id in [12u8, 13, p::cmd::RAPID_SWITCH] {
+            let mut structured = [0u8; p::PACKET_LEN];
+            structured[0] = p::HEADER;
+            structured[2] = id;
+            let err = cmd_raw(&mut link, &[&hex_of(&structured)]).unwrap_err();
+            assert_refused(err, id);
+
+            let order = p::cmd_packet(id, None);
+            let err = cmd_raw(&mut link, &[&hex_of(&order)]).unwrap_err();
+            assert_refused(err, id);
+        }
+    }
+
+    #[test]
+    fn raw_parsing_allows_other_command_ids() {
+        let mut link = Link::default();
+        let order = p::cmd_packet(p::order::QUERY_NAME, None);
+        assert_eq!(cmd_raw(&mut link, &[&hex_of(&order)]).unwrap(), Run::Done);
+        let snap = p::pair_packet(false, p::cmd::SOCD, p::KeyPair::CLEARED);
+        assert_eq!(cmd_raw(&mut link, &[&hex_of(&snap)]).unwrap(), Run::Done);
+        let layout = p::key_layout_packet(false, p::layout::MODE, &[23], &[0]);
+        assert_eq!(cmd_raw(&mut link, &[&hex_of(&layout)]).unwrap(), Run::Done);
+    }
+
+    #[test]
+    fn query_parsing_rejects_forbidden_ids_in_both_spaces() {
+        let mut link = Link::default();
+        for id in ["12", "13", "45"] {
+            let err = cmd_query(&mut link, &[id]).unwrap_err();
+            assert_refused(err, id.parse().unwrap());
+            let err = cmd_query(&mut link, &[id, "--space", "struct"]).unwrap_err();
+            assert_refused(err, id.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn query_parsing_allows_other_ids() {
+        let mut link = Link::default();
+        assert_eq!(cmd_query(&mut link, &["38"]).unwrap(), Run::Done);
+        assert_eq!(cmd_query(&mut link, &["80"]).unwrap(), Run::Done);
+        assert_eq!(
+            cmd_query(&mut link, &["44", "--space", "struct"]).unwrap(),
+            Run::Done
+        );
+        assert_eq!(
+            cmd_query(&mut link, &["35", "--space", "struct"]).unwrap(),
+            Run::Done
+        );
+    }
+
+    #[test]
+    fn pair_switch_parsing_is_rejected() {
+        let mut link = Link::default();
+        for kind in ["switch", "rs"] {
+            let err = cmd_pair(&mut link, &[kind, "4", "22"], false).unwrap_err();
+            assert_refused(err, p::cmd::RAPID_SWITCH);
+            let err = cmd_pair(&mut link, &[kind, "4", "22", "0", "0", "1"], true).unwrap_err();
+            assert_refused(err, p::cmd::RAPID_SWITCH);
+        }
+    }
+
+    #[test]
+    fn pair_snap_parsing_is_allowed() {
+        let mut link = Link::default();
+        assert_eq!(
+            cmd_pair(&mut link, &["snap", "4", "22"], false).unwrap(),
+            Run::Done
+        );
+        assert_eq!(
+            cmd_pair(&mut link, &["socd", "4", "7", "0", "0", "1"], true).unwrap(),
+            Run::Done
+        );
+    }
+
+    #[test]
+    fn scan_packets_for_forbidden_ids_are_rejected() {
+        let mut link = Link::default();
+        for id in [12u8, 13, p::cmd::RAPID_SWITCH] {
+            assert_refused(link.send(scan_packet("struct", id)).unwrap_err(), id);
+            assert_refused(link.send(scan_packet("order", id)).unwrap_err(), id);
+        }
+        assert!(link.send(scan_packet("struct", p::cmd::SOCD)).is_ok());
+        assert!(link
+            .send(scan_packet("order", p::order::QUERY_NAME))
+            .is_ok());
+    }
 }

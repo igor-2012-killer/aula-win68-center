@@ -147,6 +147,11 @@ Sent with `cmd` in byte 2 and the payload starting at byte 4.
 | 44 | `SOCD` | **works** — Snap Tap, writable and persistent; dynamic-delay frame, see VENDOR-DRIVER.md §6 |
 | 45 | `RAPID_SWITCH` | **never send** — unsupported, and a write corrupts 5 key modes |
 
+`Link::send` refuses ids **12**, **13**, and **45** and returns an error
+without writing. Structured frames are matched on byte 2; single-value frames
+(byte 2 = `0`) are matched on byte 4. The list is `protocol::FORBIDDEN_COMMANDS`
+and must not be relaxed.
+
 ### 5.1 `KEY_LAYOUT` (35) — per-key settings
 
 Payload: `mode`, then up to 14 triples of `(key_id, layout, value_lo, value_hi)`.

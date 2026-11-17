@@ -51,7 +51,8 @@ Writes change a real keyboard the user is holding. Non-negotiable:
 
 * **Never send commands 12/13** (bootloader `BL_WRITE`/`BL_READ`) or
   **command 45** (Rapid Switch — silently corrupts five key modes while
-  answering with a valid-looking frame).
+  answering with a valid-looking frame). `Link::send` refuses these ids
+  (`protocol::FORBIDDEN_COMMANDS`); do not relax that list.
 * Advanced-key writes stay gated until the frame and every field value are
   confirmed against the vendor driver. Snap Tap and Mod-Tap are confirmed and
   ship enabled (`SNAP_TAP_WRITES_ENABLED` in `lib.rs` remains as a kill
