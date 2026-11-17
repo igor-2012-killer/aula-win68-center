@@ -131,7 +131,7 @@ Sent with `cmd` in byte 2 and the payload starting at byte 4.
 
 | id | Name | State on protocol 1.0.9 |
 |---|---|---|
-| 8, 9, 10, 14 | bootloader sign / erase / reboot / crc | **never send these** |
+| 8–15 | bootloader block (`BL_SIGN`, `BL_ERASE`, `BL_REBOOT`, `BL_TOAPP`, `BL_WRITE`, `BL_READ`, `BL_RCRC`, and 15) | **never send** — `protocol::reject_forbidden` |
 | 18 | `REALTIME_TRAVEL` | works |
 | 20, 21, 22, 23 | layout register aliases | answer, semantics unclear |
 | 24 | `RGB` | works |
@@ -145,12 +145,12 @@ Sent with `cmd` in byte 2 and the payload starting at byte 4.
 | 42 | `KRGB` | per-key RGB, unimplemented |
 | 43 | `DEFAULT_KEYS` | read-only |
 | 44 | `SOCD` | **works** — Snap Tap, writable and persistent; dynamic-delay frame, see VENDOR-DRIVER.md §6 |
-| 45 | `RAPID_SWITCH` | **never send** — unsupported, and a write corrupts 5 key modes |
+| 45 | `RAPID_SWITCH` | **never send** — unsupported, and a write corrupts 5 key modes; same guard |
 
-`Link::send` refuses ids **12**, **13**, and **45** and returns an error
-without writing. Structured frames are matched on byte 2; single-value frames
-(byte 2 = `0`) are matched on byte 4. The list is `protocol::FORBIDDEN_COMMANDS`
-and must not be relaxed.
+`Link::send` refuses command ids **8–15** and **45** through
+`protocol::reject_forbidden` and returns an error without writing. Structured
+frames are matched on byte 2; single-value frames (byte 2 = `0`) are matched
+on byte 4. The set is `protocol::FORBIDDEN_COMMANDS` and must not be relaxed.
 
 ### 5.1 `KEY_LAYOUT` (35) — per-key settings
 

@@ -184,29 +184,60 @@ mod tests {
     fn assert_refused(err: p::ForbiddenCommand, id: u8) {
         assert_eq!(err.id, id);
         let message = err.to_string();
-        assert!(message.contains("forbidden list"), "{message}");
-        assert!(message.contains("AGENTS.md"), "{message}");
+        assert!(message.contains(&format!("command {id}")), "{message}");
+        assert!(
+            message.contains("the range is forbidden per AGENTS.md"),
+            "{message}"
+        );
         assert!(message.contains("must not be relaxed"), "{message}");
     }
 
+    fn forbidden_ids() -> impl Iterator<Item = u8> {
+        (8..=15).chain(std::iter::once(p::cmd::RAPID_SWITCH))
+    }
+
     #[test]
-    fn send_rejects_forbidden_commands_without_a_device() {
+    fn send_rejects_each_forbidden_id_without_a_device() {
         let mut link = Link::default();
         assert!(!link.is_open());
-        for id in [12, 13, p::cmd::RAPID_SWITCH] {
+        for id in forbidden_ids() {
             assert_refused(link.send(structured(id)).unwrap_err(), id);
             assert_refused(link.send(p::cmd_packet(id, None)).unwrap_err(), id);
         }
     }
 
     #[test]
-    fn query_paths_reject_forbidden_commands_without_a_device() {
+    fn query_paths_reject_each_forbidden_id_without_a_device() {
         let mut link = Link::default();
-        for id in [12, 13, p::cmd::RAPID_SWITCH] {
+        for id in forbidden_ids() {
             assert_refused(link.query(structured(id)).unwrap_err(), id);
             assert_refused(link.query_multi(structured(id), 8).unwrap_err(), id);
             assert_refused(link.query(p::cmd_packet(id, None)).unwrap_err(), id);
+            assert_refused(
+                link.query_multi(p::cmd_packet(id, None), 8).unwrap_err(),
+                id,
+            );
             assert_refused(link.query_order(id).unwrap_err(), id);
+        }
+    }
+
+    #[test]
+    fn send_and_query_allow_neighbouring_ids_without_a_device() {
+        let mut link = Link::default();
+        for id in [7, 16, p::cmd::SOCD] {
+            assert_eq!(link.send(structured(id)), Ok(false), "structured {id}");
+            assert_eq!(link.send(p::cmd_packet(id, None)), Ok(false), "order {id}");
+            assert!(matches!(link.query(structured(id)), Ok(None)));
+            assert!(matches!(link.query(p::cmd_packet(id, None)), Ok(None)));
+            assert!(matches!(
+                link.query_multi(structured(id), PACKET_LEN),
+                Ok(None)
+            ));
+            assert!(matches!(
+                link.query_multi(p::cmd_packet(id, None), 8),
+                Ok(None)
+            ));
+            assert!(matches!(link.query_order(id), Ok(None)));
         }
     }
 

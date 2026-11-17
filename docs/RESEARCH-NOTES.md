@@ -109,7 +109,8 @@ commands **12 and 13**. Those are `BL_WRITE` and `BL_READ` from the *bootloader*
 enum, and the keyboard does not answer them at all. The vendor's own enum
 contains the same collision: `KB2_BL_WRITE`/`KB2_BL_READ` and
 `START_ADJUSTING`/`SAVE_ADJUSTING` are both `12`/`13`. `Link::send` refuses
-both encodings (structured byte 2, and order byte 4).
+the whole bootloader block, command ids 8–15, in both encodings (structured
+byte 2, and order byte 4) through `protocol::reject_forbidden`.
 
 The test that used to pin the old conclusion,
 `hardware_snap_tap_is_read_only_on_firmware_9_1`, has been **deleted and
@@ -147,7 +148,8 @@ and restore every key mode first.
 
 If Rapid Switch is ever implemented, add it with the same state discipline as
 Snap Tap. Until then `Link::send` refuses command 45, including `aula-probe
-pair switch` and raw frames, and the list must not be relaxed.
+pair switch` and raw frames, through `protocol::reject_forbidden`. The guard
+must not be relaxed.
 
 ### Logo / ambient lighting (25)
 

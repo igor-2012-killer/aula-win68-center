@@ -24,8 +24,8 @@
 //!   be saved and restored around any Snap Tap edit.
 //! * `cmd::LOGO_RGB` is not implemented on this firmware; it is never sent.
 //! * `cmd::RAPID_SWITCH` (45) persists nothing and corrupts the mode of five
-//!   keys. `Link::send` refuses it, along with bootloader ids 12 and 13. See
-//!   `docs/VENDOR-DRIVER.md` §6.
+//!   keys. `Link::send` refuses it, along with bootloader command ids 8–15,
+//!   through `protocol::reject_forbidden`. See `docs/VENDOR-DRIVER.md` §6.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
