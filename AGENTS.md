@@ -17,12 +17,12 @@ npm run build                 # frontend: tsc --noEmit + vite build
 npm run app                   # Tauri dev with hot reload
 
 cargo test --manifest-path src-tauri/Cargo.toml --lib              # unit tests, no hardware
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets    # levels: that Cargo.toml [lints]
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
 cargo build --manifest-path tools/probe/Cargo.toml --release       # probe must build standalone
 cargo test --manifest-path tools/probe/Cargo.toml                  # unit tests, no hardware
-cargo clippy --manifest-path tools/probe/Cargo.toml --all-targets -- -D warnings
+cargo clippy --manifest-path tools/probe/Cargo.toml --all-targets  # levels: that Cargo.toml [lints]
 cargo fmt --manifest-path tools/probe/Cargo.toml -- --check
 
 cargo run --manifest-path tools/probe/Cargo.toml --release -- state    # hardware snapshot
@@ -34,6 +34,9 @@ opt-in only: `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored
 
 CI runs five jobs: frontend build, backend test + clippy + fmt, standalone
 probe build + test + clippy + fmt, Windows release build, markdown link check.
+Clippy strictness is the `[lints]` table in each `Cargo.toml` (keep the shared
+entries aligned: the probe compiles `protocol.rs`, `hid.rs`, and `keymap.rs`
+by path). CI still passes `-D warnings` as a backstop.
 
 ## Architecture rules
 

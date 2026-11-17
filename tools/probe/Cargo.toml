@@ -20,3 +20,17 @@ serde = { version = "1", features = ["derive"] }
 [profile.release]
 opt-level = "s"
 strip = true
+
+# Same shared set as src-tauri/Cargo.toml. `priority = -1` lets a more specific
+# lint, or an `#[allow]` in source, override the group. Stdout, stderr, and
+# `process::exit` are intentionally not denied on this binary; the included
+# protocol modules deny them so they still match the app.
+[lints.rust]
+warnings = { level = "deny", priority = -1 }
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
