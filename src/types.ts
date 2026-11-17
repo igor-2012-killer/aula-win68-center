@@ -1,103 +1,16 @@
-﻿/** Mirrors `src-tauri/src/state.rs`. Keep both in sync. */
+﻿/** IPC structs generated from Rust. UI constants below are not on the wire. */
 
-export type KeyMode = "global" | "single" | "rapidtrigger";
+import type { KeyMode } from "./generated/ipc";
 
-export interface KeySettings {
-  mode: KeyMode;
-  /** Actuation point, millimetres. */
-  actuation: number;
-  /** Rapid trigger press sensitivity, millimetres. */
-  rt_press: number;
-  /** Rapid trigger release sensitivity, millimetres. */
-  rt_release: number;
-  press_deadzone: number;
-  release_deadzone: number;
-}
-
-export interface SnapTap {
-  /** HID id of the first key of the pair; also the read address. */
-  key_a: number;
-  /** HID id of the second key of the pair. */
-  key_b: number;
-  /**
-   * Resolver mode: 0 = last key pressed wins ("Back cover"), 1 = the first
-   * key wins, 2 = the second key wins, 3 = neutral (both held → neither).
-   * Confirmed by capture from the vendor driver and on the board.
-   */
-  mode: number;
-  /** Dynamic delay in milliseconds; the vendor's own UI sends 0. */
-  delay_ms: number;
-}
-
-export interface Lighting {
-  enabled: boolean;
-  effect: number;
-  /** 0..4 */
-  brightness: number;
-  /** 0..4 */
-  speed: number;
-  reversed: boolean;
-  super_response: boolean;
-  /** Minutes; 0 = never. */
-  sleep_minutes: number;
-  static_effect: number;
-  /** Seven `#rrggbb` strings in wire order. */
-  colors: [string, string, string, string, string, string, string];
-}
-
-
-export interface KeyDef {
-  id: number;
-  row: number;
-  col: number;
-  label: string;
-  x: number;
-  y: number;
-  w: number;
-}
-
-export interface KeyboardState {
-  connected: boolean;
-  reconnecting: boolean;
-  last_error: string | null;
-  device_name: string;
-  firmware: string;
-  min_travel: number;
-  max_travel: number;
-  step: number;
-  polling_rate: number;
-  profile: number;
-  mac_layout: boolean;
-  global_actuation: number;
-  global_press_deadzone: number;
-  global_release_deadzone: number;
-  lighting: Lighting;
-  /**
-   * Configured Snap Tap pair, or `null` when Snap Tap is off.
-   *
-   * `value_a` / `value_b` are raw firmware units — the vendor calls them
-   * `DKSV[0]` / `DKSV[1]` and their unit has not been measured, so the UI does
-   * not present them as millimetres.
-   */
-  snap_tap: SnapTap | null;
-  /** Keys carrying a Mod-Tap assignment, sorted by key id. */
-  mod_tap: ModTapAssignment[];
-  keys: Record<number, KeySettings>;
-  layout: KeyDef[];
-  presets: [string, number[]][];
-}
-
-/** Mirrors `state.rs::ModTapAssignment`. */
-export interface ModTapAssignment {
-  /** HID id of the key the assignment lives on; also the read address. */
-  key_id: number;
-  /** HID usage id emitted on a hold past the threshold; 0 = no output. */
-  hold_key: number;
-  /** HID usage id emitted on a short press; 0 = no output. */
-  tap_key: number;
-  /** Hold threshold, milliseconds. */
-  delay_ms: number;
-}
+export type {
+  KeyDef,
+  KeyMode,
+  KeySettings,
+  KeyboardState,
+  Lighting,
+  ModTapAssignment,
+  SnapTap,
+} from "./generated/ipc";
 
 export const SENSOR_COLS = 21;
 export const SENSOR_COUNT = 21 * 6;

@@ -6,6 +6,7 @@
 
 use serde::Serialize;
 
+#[cfg_attr(ipc_bindings, derive(ts_rs::TS))]
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct KeyDef {
     pub id: u16,

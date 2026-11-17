@@ -42,8 +42,10 @@ probe build + test + clippy + fmt, Windows release build, markdown link check.
 * `protocol.rs`, `hid.rs` and `keymap.rs` must stay free of Tauri and logging —
   `tools/probe` includes them by source path. A protocol change that only
   builds in the app is a bug; build the probe too.
-* `src/types.ts` deliberately mirrors `src-tauri/src/state.rs`; it is the IPC
-  contract. Change both sides together.
+* IPC types, command arguments, and event payloads are generated from Rust
+  into `src/generated/ipc.ts`. `cargo test` fails if that file is stale.
+  Regenerate with
+  `UPDATE_IPC_BINDINGS=1 cargo test --manifest-path src-tauri/Cargo.toml --lib ipc_bindings_are_fresh`.
 * Every reply is validated against the command sent — stale packets and request
   echoes look like valid 64-byte frames. Details in `docs/ARCHITECTURE.md`.
 

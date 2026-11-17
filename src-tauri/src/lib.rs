@@ -6,6 +6,9 @@ mod keymap;
 mod protocol;
 mod state;
 
+#[cfg(test)]
+mod ipc_bindings;
+
 use std::sync::Arc;
 
 use tauri::{Manager, State};

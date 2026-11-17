@@ -7,7 +7,7 @@ use crate::keymap::{self, KeyDef};
 use crate::protocol::touch_mode;
 
 /// High nibble of a key's mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum KeyMode {
     /// Inherits the global actuation point.
@@ -47,7 +47,7 @@ impl KeyMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS)]
 pub struct KeySettings {
     pub mode: KeyMode,
     /// Actuation point in millimetres.
@@ -71,7 +71,7 @@ impl Default for KeySettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct Lighting {
     pub enabled: bool,
     pub effect: u8,
@@ -122,7 +122,7 @@ impl Default for Lighting {
 /// of this model. An earlier build exposed the thresholds as sliders and two
 /// written configurations made keys inert — the vendor's zeros are what
 /// works.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SnapTap {
     /// First key of the pair, by HID id. This is the read address.
     pub key_a: u16,
@@ -154,7 +154,7 @@ pub struct SavedKeyMode {
 /// short press. Both are HID usage ids, and the threshold comes from the
 /// firmware in 10 ms units. Semantics confirmed against the vendor driver and
 /// on the board — see `docs/VENDOR-DRIVER.md` §6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ModTapAssignment {
     /// The key the assignment lives on, by HID id. Also the read address.
     pub key_id: u16,
@@ -174,7 +174,7 @@ impl ModTapAssignment {
 }
 
 /// Everything the UI needs in one payload.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct KeyboardState {
     pub connected: bool,
     /// Set while the device is re-enumerating after a polling-rate change.

@@ -1,10 +1,10 @@
 import { useMemo } from "preact/hooks";
-import type { KeyDef, KeyMode, KeySettings } from "../types";
+import type { KeyDef, KeyMode, KeyboardState } from "../types";
 import { SENSOR_COLS } from "../types";
 
 interface KeyboardProps {
   layout: KeyDef[];
-  keys: Record<number, KeySettings>;
+  keys: KeyboardState["keys"];
   selection: Set<number>;
   /** Micrometres indexed by `row * 21 + col`; omit to hide the live overlay. */
   sensors?: number[];
