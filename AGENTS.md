@@ -21,7 +21,9 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
 cargo build --manifest-path tools/probe/Cargo.toml --release       # probe must build standalone
+cargo test --manifest-path tools/probe/Cargo.toml                  # unit tests, no hardware
 cargo clippy --manifest-path tools/probe/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path tools/probe/Cargo.toml -- --check
 
 cargo run --manifest-path tools/probe/Cargo.toml --release -- state    # hardware snapshot
 ```
@@ -31,7 +33,7 @@ opt-in only: `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored
 `#[ignore]` is the only gate — there is no environment variable.
 
 CI runs five jobs: frontend build, backend test + clippy + fmt, standalone
-probe build, Windows release build, markdown link check.
+probe build + test + clippy + fmt, Windows release build, markdown link check.
 
 ## Architecture rules
 
