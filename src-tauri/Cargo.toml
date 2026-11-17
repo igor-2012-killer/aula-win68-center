@@ -38,3 +38,21 @@ strip = true
 heck = "0.5.0"
 quote = "1.0.47"
 syn = { version = "3.0.10", features = ["full", "visit"] }
+
+# `priority = -1` lets a more specific lint, or an `#[allow]` in source, override
+# the group. Keep this table aligned with tools/probe/Cargo.toml for every lint
+# that applies to protocol.rs, hid.rs, and keymap.rs (the probe includes them
+# by path). The three entries below the shared set are app-only: the probe is
+# a CLI and prints, including `process::exit`.
+[lints.rust]
+warnings = { level = "deny", priority = -1 }
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+exit = "deny"

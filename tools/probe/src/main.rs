@@ -19,15 +19,19 @@
 // crate only exercises part of each. `dead_code` is allowed on the module
 // declarations rather than crate-wide, to keep the probe's own code checked.
 // (`protocol.rs` carries its own inner allow, since the app needs it too.)
+// Prints and `process::exit` are denied on these modules so they match the app.
 #[path = "../../../src-tauri/src/protocol.rs"]
+#[deny(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 mod protocol;
 
 #[path = "../../../src-tauri/src/hid.rs"]
 #[allow(dead_code)]
+#[deny(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 mod hid;
 
 #[path = "../../../src-tauri/src/keymap.rs"]
 #[allow(dead_code)]
+#[deny(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 mod keymap;
 
 use std::process::ExitCode;
