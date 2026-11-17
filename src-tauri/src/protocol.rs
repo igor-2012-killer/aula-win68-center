@@ -190,7 +190,13 @@ pub mod socd_mode {
 fn checksum(buf: &[u8; PACKET_LEN]) -> u8 {
     let mut sum: u32 = 53 + buf[0] as u32 + buf[1] as u32 + buf[2] as u32;
     let len = buf[1] as usize;
-    if len > 0 && len <= PACKET_LEN * 4 {
+    // The folded byte is `buf[len + 3]`, the last payload byte. Payload
+    // starts at index 4, so the largest length that still lands inside this
+    // 64-byte buffer is `PACKET_LEN - 4` (60): index 63. The old guard
+    // (`PACKET_LEN * 4`, 256) accepted 61..=255 and panicked on the index.
+    // Builders only emit in-range lengths; the bound is what makes a bad
+    // length byte safe.
+    if len > 0 && len <= PACKET_LEN - 4 {
         sum += buf[len + 3] as u32;
     }
     (sum & 0xFF) as u8
@@ -778,6 +784,37 @@ mod tests {
         // Hand-computed: 53 + 0x5C(92) + len(3) + cmd(0x00) + last(0xFF) = 403 = 0x193
         let pkt = cmd_packet(order::POLLING_RATE, None);
         assert_eq!(pkt[3], 0x93);
+    }
+
+    #[test]
+    fn checksum_ignores_a_length_past_the_buffer() {
+        // A full packet (length 60) folds in byte 63. One past that, the
+        // buffer length itself, and the largest `u8` length must not index
+        // off the end — they used to, because `len <= PACKET_LEN * 4` is
+        // true for every length byte.
+        let mut buf = [0u8; PACKET_LEN];
+        buf[0] = HEADER;
+        buf[2] = 0x18;
+        buf[PACKET_LEN - 1] = 0xAB;
+
+        buf[1] = (PACKET_LEN - 4) as u8;
+        let full = checksum(&buf);
+        let expected_full =
+            ((53 + u32::from(HEADER) + (PACKET_LEN - 4) as u32 + 0x18 + 0xAB) & 0xFF) as u8;
+        assert_eq!(
+            full, expected_full,
+            "a full packet still folds in its last byte"
+        );
+
+        for len in [PACKET_LEN - 3, PACKET_LEN, 255] {
+            buf[1] = u8::try_from(len).expect("length fits in the length byte");
+            let skipped = checksum(&buf);
+            let expected = ((53 + u32::from(HEADER) + len as u32 + 0x18) & 0xFF) as u8;
+            assert_eq!(
+                skipped, expected,
+                "length {len} is past the buffer and must not be indexed"
+            );
+        }
     }
 
     #[test]

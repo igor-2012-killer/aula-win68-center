@@ -448,7 +448,12 @@ fn hex(rgb: [u8; 3]) -> String {
 
 fn parse_hex(value: &str) -> [u8; 3] {
     let clean = value.trim().trim_start_matches('#');
-    if clean.len() != 6 {
+    // `len` is bytes. A multibyte character can make the string six bytes
+    // long while `clean[i..i + 2]` lands inside it (`"aé123"` splits `é`),
+    // and that panic aborts the process (`panic = "abort"` in release).
+    // Non-ASCII takes the same fallback as a wrong length. Invalid hex
+    // digits still become 0, one byte at a time.
+    if clean.len() != 6 || !clean.is_ascii() {
         return [255, 0, 0];
     }
     let part = |i: usize| u8::from_str_radix(&clean[i..i + 2], 16).unwrap_or(0);
@@ -1534,6 +1539,24 @@ mod unit {
         // `write_snap_tap` returns early in this case, so no packet addressed to
         // key 0 ever goes out. Pinned here because the guard is a silent `return`.
         assert!(KeyboardState::default().snap_tap.is_none());
+    }
+
+    #[test]
+    fn parse_hex_rejects_non_ascii_instead_of_panicking() {
+        // `"aé123"` is six bytes (`é` is two) and five characters. The old
+        // slice `clean[0..2]` panicked: byte 2 is inside `é`. `"😀ab"` is the
+        // same shape (a 4-byte scalar plus two ASCII bytes).
+        assert_eq!(parse_hex("aé123"), [255, 0, 0]);
+        assert_eq!(parse_hex("#aé123"), [255, 0, 0]);
+        assert_eq!(parse_hex("😀ab"), [255, 0, 0]);
+
+        // Wrong length keeps the red fallback. A six-character string of
+        // invalid hex digits still parses per byte, and each failure is 0.
+        assert_eq!(parse_hex("abc"), [255, 0, 0]);
+        assert_eq!(parse_hex("zzzzzz"), [0, 0, 0]);
+
+        assert_eq!(parse_hex("#ff8000"), [0xff, 0x80, 0x00]);
+        assert_eq!(parse_hex("  #ff8000 "), [0xff, 0x80, 0x00]);
     }
 }
 
