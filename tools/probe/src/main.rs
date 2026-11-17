@@ -549,7 +549,9 @@ fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> Run {
     let to: u8 = flag(args, "to").and_then(|v| v.parse().ok()).unwrap_or(127);
     let verbose = args.contains(&"--verbose");
 
-    println!("{BOLD}Scanning{RESET} space={space} range={from}..={to}  {DIM}(bootloader range 8..15 is skipped){RESET}\n");
+    println!(
+        "{BOLD}Scanning{RESET} space={space} range={from}..={to}  {DIM}(forbidden command ids are not sent){RESET}\n"
+    );
     println!(
         "  {DIM}green{RESET} = the firmware answered, {DIM}dim{RESET} = echo or stale packet\n"
     );
@@ -557,11 +559,14 @@ fn cmd_scan(api: &mut HidApi, link: &mut Link, args: &[&str]) -> Run {
     println!("  {}", DIM.to_string() + &"-".repeat(58) + RESET);
 
     for id in from..=to {
-        if space == "struct" && (8..=15).contains(&id) {
-            continue;
-        }
+        let packet = match scan_packet_checked(&space, id) {
+            Ok(packet) => packet,
+            Err(err) => {
+                println!("  {id:>4}  {RED}refused{RESET}  {err}");
+                continue;
+            }
+        };
         let link = open_link(api, link);
-        let packet = scan_packet(&space, id);
         let r = match link.query(packet) {
             Err(err) => {
                 println!("  {id:>4}  {RED}refused{RESET}  {err}");
@@ -1210,6 +1215,12 @@ fn scan_packet(space: &str, id: u8) -> [u8; p::PACKET_LEN] {
     }
 }
 
+fn scan_packet_checked(space: &str, id: u8) -> Result<[u8; p::PACKET_LEN], p::ForbiddenCommand> {
+    let packet = scan_packet(space, id);
+    p::reject_forbidden(&packet)?;
+    Ok(packet)
+}
+
 fn struct_read(id: u8) -> [u8; p::PACKET_LEN] {
     let mut buf = [0u8; p::PACKET_LEN];
     buf[0] = p::HEADER;
@@ -1251,15 +1262,21 @@ mod tests {
         assert_eq!(err.id, id);
         let message = err.to_string();
         assert!(message.contains(&format!("command {id}")), "{message}");
-        assert!(message.contains("forbidden list"), "{message}");
-        assert!(message.contains("AGENTS.md"), "{message}");
+        assert!(
+            message.contains("the range is forbidden per AGENTS.md"),
+            "{message}"
+        );
         assert!(message.contains("must not be relaxed"), "{message}");
     }
 
+    fn forbidden_ids() -> impl Iterator<Item = u8> {
+        (8..=15).chain(std::iter::once(p::cmd::RAPID_SWITCH))
+    }
+
     #[test]
-    fn raw_parsing_rejects_forbidden_commands() {
+    fn raw_parsing_rejects_each_forbidden_id() {
         let mut link = Link::default();
-        for id in [12u8, 13, p::cmd::RAPID_SWITCH] {
+        for id in forbidden_ids() {
             let mut structured = [0u8; p::PACKET_LEN];
             structured[0] = p::HEADER;
             structured[2] = id;
@@ -1269,6 +1286,27 @@ mod tests {
             let order = p::cmd_packet(id, None);
             let err = cmd_raw(&mut link, &[&hex_of(&order)]).unwrap_err();
             assert_refused(err, id);
+        }
+    }
+
+    #[test]
+    fn raw_parsing_allows_neighbouring_ids() {
+        let mut link = Link::default();
+        for id in [7u8, 16, p::cmd::SOCD] {
+            let mut structured = [0u8; p::PACKET_LEN];
+            structured[0] = p::HEADER;
+            structured[2] = id;
+            assert_eq!(
+                cmd_raw(&mut link, &[&hex_of(&structured)]).unwrap(),
+                Run::Done,
+                "structured {id}"
+            );
+            let order = p::cmd_packet(id, None);
+            assert_eq!(
+                cmd_raw(&mut link, &[&hex_of(&order)]).unwrap(),
+                Run::Done,
+                "order {id}"
+            );
         }
     }
 
@@ -1284,13 +1322,31 @@ mod tests {
     }
 
     #[test]
-    fn query_parsing_rejects_forbidden_ids_in_both_spaces() {
+    fn query_parsing_rejects_each_forbidden_id_in_both_spaces() {
         let mut link = Link::default();
-        for id in ["12", "13", "45"] {
-            let err = cmd_query(&mut link, &[id]).unwrap_err();
-            assert_refused(err, id.parse().unwrap());
-            let err = cmd_query(&mut link, &[id, "--space", "struct"]).unwrap_err();
-            assert_refused(err, id.parse().unwrap());
+        for id in forbidden_ids() {
+            let text = id.to_string();
+            let err = cmd_query(&mut link, &[&text]).unwrap_err();
+            assert_refused(err, id);
+            let err = cmd_query(&mut link, &[&text, "--space", "struct"]).unwrap_err();
+            assert_refused(err, id);
+        }
+    }
+
+    #[test]
+    fn query_parsing_allows_neighbouring_ids() {
+        let mut link = Link::default();
+        for id in ["7", "16", "44"] {
+            assert_eq!(
+                cmd_query(&mut link, &[id]).unwrap(),
+                Run::Done,
+                "order {id}"
+            );
+            assert_eq!(
+                cmd_query(&mut link, &[id, "--space", "struct"]).unwrap(),
+                Run::Done,
+                "struct {id}"
+            );
         }
     }
 
@@ -1334,15 +1390,23 @@ mod tests {
     }
 
     #[test]
-    fn scan_packets_for_forbidden_ids_are_rejected() {
+    fn scan_checked_packets_reject_each_forbidden_id_and_allow_neighbours() {
         let mut link = Link::default();
-        for id in [12u8, 13, p::cmd::RAPID_SWITCH] {
+        for id in forbidden_ids() {
+            assert_refused(scan_packet_checked("struct", id).unwrap_err(), id);
+            assert_refused(scan_packet_checked("order", id).unwrap_err(), id);
             assert_refused(link.send(scan_packet("struct", id)).unwrap_err(), id);
             assert_refused(link.send(scan_packet("order", id)).unwrap_err(), id);
+            assert_refused(link.query(scan_packet("struct", id)).unwrap_err(), id);
+            assert_refused(link.query(scan_packet("order", id)).unwrap_err(), id);
         }
-        assert!(link.send(scan_packet("struct", p::cmd::SOCD)).is_ok());
-        assert!(link
-            .send(scan_packet("order", p::order::QUERY_NAME))
-            .is_ok());
+        for id in [7u8, 16, p::cmd::SOCD] {
+            assert!(scan_packet_checked("struct", id).is_ok(), "struct {id}");
+            assert!(scan_packet_checked("order", id).is_ok(), "order {id}");
+            assert!(link.send(scan_packet("struct", id)).is_ok());
+            assert!(link.send(scan_packet("order", id)).is_ok());
+            assert!(link.query(scan_packet("struct", id)).is_ok());
+            assert!(link.query(scan_packet("order", id)).is_ok());
+        }
     }
 }

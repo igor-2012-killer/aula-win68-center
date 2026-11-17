@@ -61,10 +61,11 @@ non-zero test is worth more than any amount of further code reading.
 Every write changes a real keyboard the user is holding. These are not
 reversible in the usual sense:
 
-* **Commands 12 and 13 are bootloader `BL_WRITE` / `BL_READ`.** Never send them.
+* **Command ids 8–15 are the bootloader block.** Never send them.
+  `protocol::reject_forbidden` refuses the range on every write.
 * **Command 45 (Rapid Switch) corrupts the A, G, C, B and Fn modes.** It answers
   with a valid-looking structured frame rather than refusing, so it looks like it
-  worked. Never send it.
+  worked. The same guard refuses it. Never send it.
 * Snap Tap and Mod-Tap writes change real key behaviour. Their frames are now
   capture-confirmed and both features work; the same discipline applies to
   anything new: **no advanced-key writes until the frame and every field value

@@ -527,8 +527,7 @@ unexplored.
 
 | id | Vendor name | Corrected understanding |
 |---|---|---|
-| 8-10, 14 | bootloader | **never send** |
-| 12, 13 | `BL_WRITE` / `BL_READ`, `START_ADJUSTING` / `SAVE_ADJUSTING` | bootloader aliases, **never send** |
+| 8-15 | bootloader (`BL_SIGN` through `BL_RCRC`, and 15) | **never send** — `protocol::reject_forbidden` |
 | 18 | `REALTIME_TRAVEL` | works, 192-byte replies are reassembled from `0x92` frames |
 | 24 | `PRGB` | works |
 | 25 | `LOGORGB` | answers `0xFF` on this model |
@@ -540,7 +539,7 @@ unexplored.
 | 41 | `DB` | actuation works; dead press/release are layouts 22/23 |
 | 42 | `KRGB` | per-key RGB, `DynamicLightColor` present |
 | **44** | **`SOCD`** | **works** — Snap Tap, writable and persistent; see §6 |
-| **45** | **`RS`** | **unsupported and unsafe** — corrupts 5 key modes; never send |
+| **45** | **`RS`** | **unsupported and unsafe** — corrupts 5 key modes; never send (`protocol::reject_forbidden`) |
 | 1 | `SYNC` / `PROTOCOL_VERSION` | protocol version `1.0.9`, plus identity in the long form |
 
 ---
@@ -572,11 +571,13 @@ unexplored.
 
 ## 11. Safety notes for anyone poking at this firmware
 
-* **Never send 12 or 13.** `BL_WRITE` / `BL_READ` are bootloader commands. The
-  `12` / `13` names also appear as `START_ADJUSTING` / `SAVE_ADJUSTING` in the
-  same enum, which is almost certainly why some old code tried them. There is no
-  calibration or factory reset on this firmware.
-* **Never send 45.** See §6 — it corrupts the mode field of five keys.
+* **Never send command ids 8–15.** They are the bootloader block (`BL_SIGN`
+  through `BL_RCRC`, and 15). `12` / `13` are also named `START_ADJUSTING` /
+  `SAVE_ADJUSTING` / `FACTORY_DATA_RESET` in the order enum, which is why some
+  old code tried them. There is no calibration or factory reset on this
+  firmware. `protocol::reject_forbidden` refuses the range on every write.
+* **Never send 45.** See §6 — it corrupts the mode field of five keys. The
+  same guard refuses it.
 * **Capture the whole key state before any command you do not fully
   understand.** Snap Tap already shows the hazard: it rewrites the mode field of
   both keys in the pair as a side effect, and clearing the pair does not undo

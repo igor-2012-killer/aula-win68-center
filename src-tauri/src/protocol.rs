@@ -78,9 +78,8 @@ pub mod cmd {
 
 /// Command ids that must never be written. See AGENTS.md.
 ///
-/// 12 and 13 are bootloader `BL_WRITE` / `BL_READ` (also the order-space names
-/// `START_ADJUSTING` / `SAVE_ADJUSTING`). 45 is Rapid Switch.
-pub const FORBIDDEN_COMMANDS: [u8; 3] = [12, 13, 45];
+/// 8 through 15 are the bootloader block. 45 is Rapid Switch.
+pub const FORBIDDEN_COMMANDS: [u8; 9] = [8, 9, 10, 11, 12, 13, 14, 15, 45];
 
 /// A frame was refused because its command id is in [`FORBIDDEN_COMMANDS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,9 +91,7 @@ impl std::fmt::Display for ForbiddenCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "command {} is on the forbidden list (AGENTS.md: never send 12/13 \
-             bootloader BL_WRITE/BL_READ or 45 Rapid Switch) and must not be sent; \
-             the list must not be relaxed",
+            "command {} is forbidden; the range is forbidden per AGENTS.md and must not be relaxed",
             self.id
         )
     }
@@ -677,23 +674,66 @@ mod tests {
         buf
     }
 
+    fn assert_forbidden(err: ForbiddenCommand, id: u8) {
+        assert_eq!(err.id, id);
+        let message = err.to_string();
+        assert!(message.contains(&format!("command {id}")), "{message}");
+        assert!(
+            message.contains("the range is forbidden per AGENTS.md"),
+            "{message}"
+        );
+        assert!(message.contains("must not be relaxed"), "{message}");
+    }
+
     #[test]
-    fn reject_forbidden_blocks_bootloader_and_rapid_switch() {
-        for id in [12, 13, cmd::RAPID_SWITCH] {
+    fn forbidden_commands_are_ids_8_through_15_and_45() {
+        assert_eq!(FORBIDDEN_COMMANDS, [8, 9, 10, 11, 12, 13, 14, 15, 45]);
+        assert_eq!(cmd::RAPID_SWITCH, 45);
+    }
+
+    #[test]
+    fn reject_forbidden_blocks_each_id_in_8_through_15_and_45() {
+        for id in (8..=15).chain(std::iter::once(cmd::RAPID_SWITCH)) {
             let mut structured = [0u8; PACKET_LEN];
             structured[0] = HEADER;
             structured[2] = id;
-            let err = reject_forbidden(&structured).unwrap_err();
-            assert_eq!(err.id, id);
-            let message = err.to_string();
-            assert!(message.contains("forbidden list"), "{message}");
-            assert!(message.contains("AGENTS.md"), "{message}");
-            assert!(message.contains("must not be relaxed"), "{message}");
-            assert!(message.contains(&id.to_string()), "{message}");
+            assert_forbidden(reject_forbidden(&structured).unwrap_err(), id);
 
             let order = cmd_packet(id, None);
             assert_eq!(order[2], 0, "order frames keep the id in the payload");
-            assert_eq!(reject_forbidden(&order).unwrap_err().id, id);
+            assert_eq!(order[4], id);
+            assert_forbidden(reject_forbidden(&order).unwrap_err(), id);
+        }
+    }
+
+    #[test]
+    fn reject_forbidden_allows_neighbouring_ids_7_16_and_44() {
+        for id in [7, 16, cmd::SOCD] {
+            let mut structured = [0u8; PACKET_LEN];
+            structured[0] = HEADER;
+            structured[2] = id;
+            structured[4] = 12;
+            structured[5] = 45;
+            assert!(reject_forbidden(&structured).is_ok(), "structured {id}");
+            assert!(
+                reject_forbidden(&cmd_packet(id, None)).is_ok(),
+                "order {id}"
+            );
+            assert!(
+                reject_forbidden(&cmd_packet(id, Some(15))).is_ok(),
+                "order {id} value"
+            );
+        }
+    }
+
+    #[test]
+    fn reject_forbidden_allows_key_layout_registers_8_through_15() {
+        for layout_id in 8..=15 {
+            let read = key_layout_packet(false, layout_id, &[0x17], &[0]);
+            assert_eq!(read[2], cmd::KEY_LAYOUT);
+            assert!(reject_forbidden(&read).is_ok(), "read layout {layout_id}");
+            let write = key_layout_packet(true, layout_id, &[0x17], &[2000]);
+            assert!(reject_forbidden(&write).is_ok(), "write layout {layout_id}");
         }
     }
 

@@ -27,8 +27,10 @@ small, but not empty.
 
 Structured command ids **8 through 15** are the bootloader interface
 (`BL_SIGN`, `BL_ERASE`, `BL_REBOOT`, `BL_TOAPP`, `BL_WRITE`, `BL_READ`,
-`BL_RCRC`). The application never sends them, `aula-probe` refuses to scan that
-range in `--space struct`, and contributions that add them will be rejected.
+`BL_RCRC`, and 15). Every write path refuses them through
+`protocol::reject_forbidden` (`Link::send`), including `aula-probe` raw, query,
+and scan. The same guard refuses command 45. Contributions that relax it will
+be rejected.
 
 Please report anything that does send them.
 
