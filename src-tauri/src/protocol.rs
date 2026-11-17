@@ -1212,4 +1212,308 @@ mod tests {
         assert!(r.is_fail());
         assert!(!r.matches(cmd::RGB));
     }
+
+    #[test]
+    fn shared_module_scanner_ignores_comments_and_strings() {
+        let clean = concat!(
+            "// tauri::Runtime log::info tauri_plugin_log\n",
+            "/* log::info!(\"x\") */\n",
+            "const NAMED: &str = \"tauri log:: tauri_plugin_log\";\n",
+            "const RAW: &str = r#\"log::\"#;\n",
+            "fn ok() { let _life = 'static; let _byte = b\"tauri\"; }\n",
+        );
+        assert_eq!(
+            forbidden_shared_usage(clean),
+            None,
+            "comments and strings are not uses"
+        );
+
+        let use_crate = "fn bad() {\n    tauri::Runtime;\n}\n";
+        assert_eq!(
+            forbidden_shared_usage(use_crate).map(|hit| (hit.line, hit.needle)),
+            Some((2, "tauri"))
+        );
+        let plugin = "fn bad() { tauri_plugin_log::Builder::new(); }\n";
+        assert_eq!(
+            forbidden_shared_usage(plugin).map(|hit| hit.needle),
+            Some("tauri_plugin_log")
+        );
+        let logging = "fn bad() {\n    log::info!(\"ok\");\n}\n";
+        assert_eq!(
+            forbidden_shared_usage(logging).map(|hit| (hit.line, hit.needle)),
+            Some((2, "log::"))
+        );
+        assert_eq!(
+            forbidden_shared_usage("fn ok() { let not_tauri = 1; let _ = not_tauri; }\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn shared_modules_stay_free_of_tauri_and_logging() {
+        for (file, src) in [
+            ("src-tauri/src/protocol.rs", include_str!("protocol.rs")),
+            ("src-tauri/src/hid.rs", include_str!("hid.rs")),
+            ("src-tauri/src/keymap.rs", include_str!("keymap.rs")),
+        ] {
+            if let Some(hit) = forbidden_shared_usage(src) {
+                panic!("{}", shared_module_rule(file, src, &hit));
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct SharedUsage {
+        line: usize,
+        needle: &'static str,
+    }
+
+    fn shared_module_rule(file: &str, src: &str, hit: &SharedUsage) -> String {
+        let text = src.lines().nth(hit.line - 1).unwrap_or("").trim();
+        format!(
+        "AGENTS.md architecture rule: `protocol.rs`, `hid.rs`, and `keymap.rs` must stay free of Tauri and logging, because `tools/probe` includes them by source path. A protocol change that only builds in the app is a bug.\n\
+         \n\
+         {file}:{} contains `{}` in code: {text}\n\
+         \n\
+         Fix: remove the `tauri`, `tauri_plugin_log`, or `log::` use from this file. Log from the caller (`device.rs` or the probe) instead. Do not import Tauri here — the probe crate does not depend on it.",
+        hit.line, hit.needle
+    )
+    }
+
+    fn forbidden_shared_usage(src: &str) -> Option<SharedUsage> {
+        let code = strip_rust_non_code(src);
+        let bytes = code.as_bytes();
+        let mut line = 1;
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\n' {
+                line += 1;
+                i += 1;
+                continue;
+            }
+            if let Some(needle) = forbidden_needle_at(bytes, i) {
+                return Some(SharedUsage { line, needle });
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn forbidden_needle_at(bytes: &[u8], i: usize) -> Option<&'static str> {
+        for needle in ["tauri_plugin_log", "log::", "tauri"] {
+            if !bytes[i..].starts_with(needle.as_bytes()) {
+                continue;
+            }
+            let before_ok = i == 0 || !is_ident_byte(bytes[i - 1]);
+            let after = i + needle.len();
+            let after_ok = if needle == "log::" {
+                true
+            } else {
+                match bytes.get(after) {
+                    Some(byte) => !is_ident_byte(*byte),
+                    None => true,
+                }
+            };
+            if before_ok && after_ok {
+                return Some(needle);
+            }
+        }
+        None
+    }
+
+    fn is_ident_byte(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || byte == b'_'
+    }
+
+    fn strip_rust_non_code(src: &str) -> String {
+        let bytes = src.as_bytes();
+        let mut out = String::with_capacity(src.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if starts_with_at(bytes, i, b"//") {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if starts_with_at(bytes, i, b"/*") {
+                i = skip_block_comment(bytes, i + 2, &mut out);
+                continue;
+            }
+            if let Some(end) = skip_char_literal(bytes, i) {
+                i = end;
+                continue;
+            }
+            if let Some(end) = skip_string_literal(bytes, i, &mut out) {
+                i = end;
+                continue;
+            }
+            let ch = src[i..]
+                .chars()
+                .next()
+                .expect("index is on a char boundary");
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+        out
+    }
+
+    fn starts_with_at(bytes: &[u8], i: usize, prefix: &[u8]) -> bool {
+        bytes.get(i..).is_some_and(|rest| rest.starts_with(prefix))
+    }
+
+    fn at_token_start(bytes: &[u8], i: usize) -> bool {
+        i == 0 || !is_ident_byte(bytes[i - 1])
+    }
+
+    fn skip_block_comment(bytes: &[u8], mut i: usize, out: &mut String) -> usize {
+        while i + 1 < bytes.len() && !starts_with_at(bytes, i, b"*/") {
+            if bytes[i] == b'\n' {
+                out.push('\n');
+            }
+            i += 1;
+        }
+        if i + 1 < bytes.len() {
+            i + 2
+        } else {
+            bytes.len()
+        }
+    }
+
+    fn skip_char_literal(bytes: &[u8], i: usize) -> Option<usize> {
+        if !at_token_start(bytes, i) {
+            return None;
+        }
+        let quote_at = if bytes.get(i) == Some(&b'b') && bytes.get(i + 1) == Some(&b'\'') {
+            i + 1
+        } else if bytes.get(i) == Some(&b'\'') {
+            i
+        } else {
+            return None;
+        };
+        let mut j = quote_at + 1;
+        if bytes.get(j) == Some(&b'\\') {
+            j += 1;
+            if bytes.get(j) == Some(&b'u') && bytes.get(j + 1) == Some(&b'{') {
+                j += 2;
+                while j < bytes.len() && bytes[j] != b'}' {
+                    j += 1;
+                }
+                if j < bytes.len() {
+                    j += 1;
+                }
+            } else if j < bytes.len() {
+                j += utf8_width(bytes[j]);
+            }
+            return (bytes.get(j) == Some(&b'\'')).then_some(j + 1);
+        }
+        if j < bytes.len() && is_ident_byte(bytes[j]) {
+            let start = j;
+            while j < bytes.len() && is_ident_byte(bytes[j]) {
+                j += 1;
+            }
+            // `'x'` is a character. `'static` is a lifetime and stays in the code.
+            if j == start + 1 && bytes.get(j) == Some(&b'\'') {
+                return Some(j + 1);
+            }
+            return None;
+        }
+        if j < bytes.len() && bytes[j] != b'\n' {
+            j += utf8_width(bytes[j]);
+            if bytes.get(j) == Some(&b'\'') {
+                return Some(j + 1);
+            }
+        }
+        None
+    }
+
+    fn skip_string_literal(bytes: &[u8], i: usize, out: &mut String) -> Option<usize> {
+        let (content, hashes) = string_body(bytes, i)?;
+        Some(if let Some(hashes) = hashes {
+            skip_raw_string(bytes, content, hashes, out)
+        } else {
+            skip_normal_string(bytes, content, out)
+        })
+    }
+
+    fn string_body(bytes: &[u8], i: usize) -> Option<(usize, Option<usize>)> {
+        if !at_token_start(bytes, i) {
+            return None;
+        }
+        let mut j = i;
+        if matches!(bytes.get(j), Some(b'b' | b'c')) {
+            let next = bytes.get(j + 1).copied();
+            if matches!(next, Some(b'"' | b'r')) {
+                j += 1;
+            } else {
+                return None;
+            }
+        }
+        if bytes.get(j) == Some(&b'r') {
+            let mut k = j + 1;
+            let mut hashes = 0;
+            while bytes.get(k) == Some(&b'#') {
+                hashes += 1;
+                k += 1;
+            }
+            if bytes.get(k) != Some(&b'"') {
+                return None;
+            }
+            return Some((k + 1, Some(hashes)));
+        }
+        if bytes.get(j) == Some(&b'"') {
+            return Some((j + 1, None));
+        }
+        None
+    }
+
+    fn skip_normal_string(bytes: &[u8], mut j: usize, out: &mut String) -> usize {
+        while j < bytes.len() {
+            if bytes[j] == b'\\' {
+                if bytes.get(j + 1) == Some(&b'\n') {
+                    out.push('\n');
+                }
+                j += 1 + usize::from(j + 1 < bytes.len());
+                continue;
+            }
+            if bytes[j] == b'"' {
+                return j + 1;
+            }
+            if bytes[j] == b'\n' {
+                out.push('\n');
+            }
+            j += 1;
+        }
+        j
+    }
+
+    fn skip_raw_string(bytes: &[u8], mut j: usize, hashes: usize, out: &mut String) -> usize {
+        while j < bytes.len() {
+            if bytes[j] == b'"'
+                && bytes
+                    .get(j + 1..j + 1 + hashes)
+                    .is_some_and(|tail| tail.iter().all(|byte| *byte == b'#'))
+            {
+                return j + 1 + hashes;
+            }
+            if bytes[j] == b'\n' {
+                out.push('\n');
+            }
+            j += 1;
+        }
+        j
+    }
+
+    fn utf8_width(first: u8) -> usize {
+        if first < 0x80 {
+            1
+        } else if first < 0xE0 {
+            2
+        } else if first < 0xF0 {
+            3
+        } else {
+            4
+        }
+    }
 }

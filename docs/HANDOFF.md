@@ -169,14 +169,17 @@ cargo clippy --manifest-path tools/probe/Cargo.toml --all-targets -- -D warnings
 
 CI (`.github/workflows/ci.yml`) runs five jobs: frontend typecheck and build,
 backend test plus clippy plus fmt, standalone probe build, Windows release build,
-and a markdown link check. All five were red at `53975a7` for environmental
+and a markdown link check. The docs job also runs `tools/check-repo-rules.sh`.
+All five were red at `53975a7` for environmental
 reasons rather than code defects; `0e6c856` fixed them. The two worth knowing
 about:
 
-* The Windows job must run `npm run build` before `cargo build`. Tauri's
-  `beforeBuildCommand` only fires for `tauri build`, and `generate_context!()`
-  resolves `frontendDist` at compile time, so a bare `cargo build` on a clean
-  checkout panics on a missing `../dist`.
+* The Windows job must run `npm run build` before
+  `cargo build --features custom-protocol`. Tauri's `beforeBuildCommand` only
+  fires for `tauri build`. `src-tauri/build.rs` stops that feature build when
+  `../dist` is missing and says to run `npm run build` first, ahead of the
+  `generate_context!()` panic. Dev and `cargo test` use `devUrl` and do not
+  need `dist/`.
 * Backend and probe need Linux system libraries: Tauri's webkit2gtk set for the
   app, `libudev-dev` for `hidapi` in both.
 

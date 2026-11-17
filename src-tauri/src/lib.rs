@@ -7,6 +7,8 @@ mod protocol;
 mod state;
 
 #[cfg(test)]
+mod agent_rules;
+#[cfg(test)]
 mod ipc_bindings;
 
 use std::sync::Arc;
