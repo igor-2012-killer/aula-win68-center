@@ -23,8 +23,9 @@
 //!   pair to Single Mode and does not revert that on clear, so the mode has to
 //!   be saved and restored around any Snap Tap edit.
 //! * `cmd::LOGO_RGB` is not implemented on this firmware; it is never sent.
-//! * `cmd::RAPID_SWITCH` (45) is never sent: it persists nothing and corrupts
-//!   the mode of five keys. See `docs/VENDOR-DRIVER.md` §6.
+//! * `cmd::RAPID_SWITCH` (45) persists nothing and corrupts the mode of five
+//!   keys. `Link::send` refuses it, along with bootloader ids 12 and 13. See
+//!   `docs/VENDOR-DRIVER.md` §6.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,6 +75,42 @@ fn um(mm: f32) -> u16 {
 
 fn mm(value: u16) -> f32 {
     (value as f32 / 1000.0 * 100.0).round() / 100.0
+}
+
+fn transmit(link: &mut Link, packet: [u8; p::PACKET_LEN]) {
+    if let Err(err) = link.send(packet) {
+        log::error!("{err}");
+    }
+}
+
+fn fetch(link: &mut Link, packet: [u8; p::PACKET_LEN]) -> Option<p::Response> {
+    match link.query(packet) {
+        Ok(reply) => reply,
+        Err(err) => {
+            log::error!("{err}");
+            None
+        }
+    }
+}
+
+fn fetch_order(link: &mut Link, cmd: u8) -> Option<p::Response> {
+    match link.query_order(cmd) {
+        Ok(reply) => reply,
+        Err(err) => {
+            log::error!("{err}");
+            None
+        }
+    }
+}
+
+fn fetch_multi(link: &mut Link, packet: [u8; p::PACKET_LEN], want: usize) -> Option<Vec<u8>> {
+    match link.query_multi(packet, want) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            log::error!("{err}");
+            None
+        }
+    }
 }
 
 /// Interprets a raw register value as a distance, rejecting the firmware's
@@ -216,7 +253,7 @@ fn apply_snap_tap(
 /// makes the side effect observable and gives us a success signal.
 fn write_pair(link: &mut Link, pair: p::KeyPair) {
     let packet = p::pair_packet(true, p::cmd::SOCD, pair);
-    match link.query(packet) {
+    match fetch(link, packet) {
         Some(reply) if reply.is_fail() => {
             log::warn!("Snap Tap write refused by firmware");
         }
@@ -262,12 +299,15 @@ fn read_key_modes(link: &mut Link, ids: &[u16]) -> Vec<SavedKeyMode> {
 /// Writes previously captured key modes back to the keyboard.
 fn restore_key_modes(link: &mut Link, modes: &[SavedKeyMode]) {
     for saved in modes {
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::MODE,
-            &[saved.key_id],
-            &[saved.mode.wire_value()],
-        ));
+        transmit(
+            link,
+            p::key_layout_packet(
+                true,
+                p::layout::MODE,
+                &[saved.key_id],
+                &[saved.mode.wire_value()],
+            ),
+        );
     }
 }
 
@@ -284,7 +324,7 @@ fn read_snap_tap(link: &mut Link, key_a: u8) -> Result<SnapTap, ()> {
             ..p::KeyPair::CLEARED
         },
     );
-    let reply = link.query(packet).ok_or(())?;
+    let reply = fetch(link, packet).ok_or(())?;
     if reply.is_fail() {
         return Err(());
     }
@@ -357,7 +397,7 @@ fn read_mod_tap(link: &mut Link, key: u8) -> Result<p::ModTap, ()> {
             ..p::ModTap::default()
         },
     );
-    let reply = link.query(packet).ok_or(())?;
+    let reply = fetch(link, packet).ok_or(())?;
     if reply.is_fail() || !reply.matches(p::cmd::MOD_TAP) {
         return Err(());
     }
@@ -723,7 +763,7 @@ impl Worker {
                 self.mark_reconnecting();
             }
             Job::Profile(index, reply) => {
-                link.send(p::cmd_packet(p::order::PROFILE_ID, Some(index)));
+                transmit(link, p::cmd_packet(p::order::PROFILE_ID, Some(index)));
                 if let Ok(mut state) = self.state.write() {
                     state.profile = index;
                 }
@@ -737,7 +777,7 @@ impl Worker {
                 } else {
                     p::order::SET_SYS_WIN
                 };
-                link.send(p::cmd_packet(cmd, Some(1)));
+                transmit(link, p::cmd_packet(cmd, Some(1)));
                 if let Ok(mut state) = self.state.write() {
                     state.mac_layout = mac;
                 }
@@ -868,16 +908,16 @@ impl Worker {
 
         // Single-value commands echo their id in byte 5, which is what tells a
         // fresh reply apart from a stale packet still sitting in the buffer.
-        if let Some(r) = link.query_order(p::order::QUERY_NAME) {
+        if let Some(r) = fetch_order(link, p::order::QUERY_NAME) {
             let name = r.name();
             if !name.is_empty() {
                 state.device_name = name;
             }
         }
-        if let Some(r) = link.query_order(p::order::VERSION) {
+        if let Some(r) = fetch_order(link, p::order::VERSION) {
             state.firmware = r.firmware();
         }
-        if let Some(r) = link.query_order(p::order::QUERY_PRECISION) {
+        if let Some(r) = fetch_order(link, p::order::QUERY_PRECISION) {
             // The vendor decodes three separate values from this reply
             // (`docs/VENDOR-DRIVER.md` §7): resolution at byte 6, then
             // minimum and maximum travel as 16-bit little-endian pairs at
@@ -906,16 +946,16 @@ impl Worker {
                 }
             }
         }
-        if let Some(r) = link.query_order(p::order::POLLING_RATE) {
+        if let Some(r) = fetch_order(link, p::order::POLLING_RATE) {
             state.polling_rate = r.value();
         }
-        if let Some(r) = link.query_order(p::order::PROFILE_ID) {
+        if let Some(r) = fetch_order(link, p::order::PROFILE_ID) {
             state.profile = r.value().min(3);
         }
-        if let Some(r) = link.query_order(p::order::QUERY_SYS_WIN) {
+        if let Some(r) = fetch_order(link, p::order::QUERY_SYS_WIN) {
             state.mac_layout = r.value() == 0;
         }
-        if let Some(r) = link.query(p::deadzone_packet(false, 0)) {
+        if let Some(r) = fetch(link, p::deadzone_packet(false, 0)) {
             if r.matches(p::cmd::DEADZONE) {
                 let actuation = r.actuation_um();
                 if actuation > 0 {
@@ -926,7 +966,7 @@ impl Worker {
             }
         }
         let rgb_query = p::rgb_packet(false, &[[255, 0, 0]; 7], false, false, false, 0, 0, 0, 0, 0);
-        if let Some(r) = link.query(rgb_query) {
+        if let Some(r) = fetch(link, rgb_query) {
             if r.matches(p::cmd::RGB) {
                 let bitmap = r.rgb_bitmap();
                 let colors = r.rgb_colors().map(hex);
@@ -1085,7 +1125,7 @@ impl Worker {
             tap_key: assignment.tap_key,
             delay_tenths: (assignment.delay_ms / 10).min(u8::MAX as u16) as u8,
         };
-        match link.query(p::mod_tap_packet(true, tap)) {
+        match fetch(link, p::mod_tap_packet(true, tap)) {
             Some(reply) if reply.is_fail() => log::warn!("Mod-Tap write refused by firmware"),
             Some(_) => {}
             None => log::warn!("Mod-Tap write got no reply"),
@@ -1114,7 +1154,7 @@ impl Worker {
             key: key_id as u8,
             ..p::ModTap::default()
         };
-        match link.query(p::mod_tap_packet(true, tap)) {
+        match fetch(link, p::mod_tap_packet(true, tap)) {
             Some(reply) if reply.is_fail() => log::warn!("Mod-Tap clear refused by firmware"),
             Some(_) => {}
             None => log::warn!("Mod-Tap clear got no reply"),
@@ -1127,7 +1167,7 @@ impl Worker {
 
     fn write_global_actuation(&self, link: &mut Link, value: f32) {
         let clamped = value.clamp(0.1, 3.4);
-        link.send(p::deadzone_packet(true, um(clamped)));
+        transmit(link, p::deadzone_packet(true, um(clamped)));
         if let Ok(mut state) = self.state.write() {
             state.global_actuation = clamped;
         }
@@ -1140,26 +1180,30 @@ impl Worker {
             match patch {
                 KeyPatch::Actuation(mm) => {
                     let values = vec![um(mm); chunk.len()];
-                    link.send(p::key_layout_packet(
-                        true,
-                        p::layout::ACTUATION,
-                        chunk,
-                        &values,
-                    ));
+                    transmit(
+                        link,
+                        p::key_layout_packet(true, p::layout::ACTUATION, chunk, &values),
+                    );
                 }
                 KeyPatch::RapidTrigger { press, release, .. } => {
-                    link.send(p::key_layout_packet(
-                        true,
-                        p::layout::RT_PRESS,
-                        chunk,
-                        &vec![um(press); chunk.len()],
-                    ));
-                    link.send(p::key_layout_packet(
-                        true,
-                        p::layout::RT_RELEASE,
-                        chunk,
-                        &vec![um(release); chunk.len()],
-                    ));
+                    transmit(
+                        link,
+                        p::key_layout_packet(
+                            true,
+                            p::layout::RT_PRESS,
+                            chunk,
+                            &vec![um(press); chunk.len()],
+                        ),
+                    );
+                    transmit(
+                        link,
+                        p::key_layout_packet(
+                            true,
+                            p::layout::RT_RELEASE,
+                            chunk,
+                            &vec![um(release); chunk.len()],
+                        ),
+                    );
                 }
                 KeyPatch::Deadzone { press, release } => {
                     // Layouts 22/23 are the vendor's `Layout_DP` / `Layout_DR`,
@@ -1167,18 +1211,24 @@ impl Worker {
                     // are `Layout_DB2` / `Layout_DB3`, advanced-key deadzone
                     // stages that ship at 2.0/3.0 mm — above the actuation point,
                     // so writing "deadzones" there made keys unusable.
-                    link.send(p::key_layout_packet(
-                        true,
-                        p::layout::DEAD_PRESS,
-                        chunk,
-                        &vec![um(press); chunk.len()],
-                    ));
-                    link.send(p::key_layout_packet(
-                        true,
-                        p::layout::DEAD_RELEASE,
-                        chunk,
-                        &vec![um(release); chunk.len()],
-                    ));
+                    transmit(
+                        link,
+                        p::key_layout_packet(
+                            true,
+                            p::layout::DEAD_PRESS,
+                            chunk,
+                            &vec![um(press); chunk.len()],
+                        ),
+                    );
+                    transmit(
+                        link,
+                        p::key_layout_packet(
+                            true,
+                            p::layout::DEAD_RELEASE,
+                            chunk,
+                            &vec![um(release); chunk.len()],
+                        ),
+                    );
                 }
                 // Reset only needs the mode nibble cleared.
                 KeyPatch::Reset => {}
@@ -1187,12 +1237,15 @@ impl Worker {
             // register for it would flip a Rapid Trigger key back to Global.
             // See `KeyPatch::rewrites_mode`.
             if patch.rewrites_mode() {
-                link.send(p::key_layout_packet(
-                    true,
-                    p::layout::MODE,
-                    chunk,
-                    &vec![target_mode; chunk.len()],
-                ));
+                transmit(
+                    link,
+                    p::key_layout_packet(
+                        true,
+                        p::layout::MODE,
+                        chunk,
+                        &vec![target_mode; chunk.len()],
+                    ),
+                );
             }
         }
 
@@ -1225,25 +1278,28 @@ impl Worker {
 
     fn write_lighting(&self, link: &mut Link, value: Lighting) {
         let colors: Vec<[u8; 3]> = value.colors.iter().map(|c| parse_hex(c)).collect();
-        link.send(p::rgb_packet(
-            true,
-            &colors,
-            value.enabled,
-            value.reversed,
-            value.super_response,
-            value.brightness.min(4),
-            value.effect,
-            value.speed.min(4),
-            value.sleep_minutes,
-            value.static_effect,
-        ));
+        transmit(
+            link,
+            p::rgb_packet(
+                true,
+                &colors,
+                value.enabled,
+                value.reversed,
+                value.super_response,
+                value.brightness.min(4),
+                value.effect,
+                value.speed.min(4),
+                value.sleep_minutes,
+                value.static_effect,
+            ),
+        );
         if let Ok(mut state) = self.state.write() {
             state.lighting = value;
         }
     }
 
     fn write_polling_rate(&self, link: &mut Link, index: u8) {
-        link.send(p::cmd_packet(p::order::POLLING_RATE, Some(index)));
+        transmit(link, p::cmd_packet(p::order::POLLING_RATE, Some(index)));
     }
 
     // ------------------------------------------------------ sensor stream
@@ -1251,7 +1307,7 @@ impl Worker {
     fn sample_sensors(&self, link: &mut Link) {
         let mut frame = vec![0u16; SENSOR_COUNT];
         for half in 1..=2u8 {
-            let Some(raw) = link.query_multi(p::realtime_travel_packet(half), 192) else {
+            let Some(raw) = fetch_multi(link, p::realtime_travel_packet(half), 192) else {
                 continue;
             };
             // Verified layout: 6-byte preamble, then 63 little-endian u16 values
@@ -1289,7 +1345,7 @@ fn read_layout(link: &mut Link, layout_id: u8, ids: &[u16]) -> HashMap<u16, u16>
     let mut out = HashMap::new();
     for chunk in ids.chunks(p::cmd::MAX_KEYS_PER_PACKET) {
         let zeros = vec![0u16; chunk.len()];
-        let Some(r) = link.query(p::key_layout_packet(false, layout_id, chunk, &zeros)) else {
+        let Some(r) = fetch(link, p::key_layout_packet(false, layout_id, chunk, &zeros)) else {
             continue;
         };
         if !r.matches(p::cmd::KEY_LAYOUT) {
@@ -1534,7 +1590,7 @@ mod hardware {
     const PROBE_KEY: u16 = 23; // T
 
     fn query_order(link: &mut Link, cmd: u8) -> u8 {
-        link.query(p::cmd_packet(cmd, None))
+        fetch(link, p::cmd_packet(cmd, None))
             .filter(|r| r.matches_order(cmd))
             .unwrap_or_else(|| panic!("no valid reply for order command {cmd}"))
             .value()
@@ -1548,6 +1604,7 @@ mod hardware {
 
         let name = link
             .query(p::cmd_packet(p::order::QUERY_NAME, None))
+            .expect("query")
             .filter(|r| r.matches_order(p::order::QUERY_NAME))
             .expect("name reply")
             .name();
@@ -1555,6 +1612,7 @@ mod hardware {
 
         let (step_um, min_um, max_um) = link
             .query(p::cmd_packet(p::order::QUERY_PRECISION, None))
+            .expect("query")
             .filter(|r| r.matches_order(p::order::QUERY_PRECISION))
             .expect("precision reply")
             .precision();
@@ -1598,12 +1656,15 @@ mod hardware {
 
         // A fire-and-forget write of a *different* layout. Its reply, if left in
         // the buffer, gets handed to the next read.
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::MODE,
-            &[KEY],
-            &[KeyMode::Global.wire_value()],
-        ));
+        transmit(
+            &mut link,
+            p::key_layout_packet(
+                true,
+                p::layout::MODE,
+                &[KEY],
+                &[KeyMode::Global.wire_value()],
+            ),
+        );
         std::thread::sleep(std::time::Duration::from_millis(80));
 
         // If the write reply leaked through, this reads the mode value (0) as a
@@ -1618,12 +1679,10 @@ mod hardware {
         );
 
         // The MODE write above is real: put the key's touch mode back.
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::MODE,
-            &[KEY],
-            &[original_mode],
-        ));
+        transmit(
+            &mut link,
+            p::key_layout_packet(true, p::layout::MODE, &[KEY], &[original_mode]),
+        );
         let restored = read_layout(&mut link, p::layout::MODE, &[KEY])
             .get(&KEY)
             .copied()
@@ -1679,12 +1738,10 @@ mod hardware {
         let original = before[&probe_id];
 
         for target in [800u16, 1200, 2000] {
-            link.send(p::key_layout_packet(
-                true,
-                p::layout::ACTUATION,
-                &[probe_id],
-                &[target],
-            ));
+            transmit(
+                &mut link,
+                p::key_layout_packet(true, p::layout::ACTUATION, &[probe_id], &[target]),
+            );
             let after = read_layout(&mut link, p::layout::ACTUATION, &[probe_id]);
             assert_eq!(
                 after.get(&probe_id),
@@ -1693,12 +1750,10 @@ mod hardware {
             );
         }
 
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::ACTUATION,
-            &[probe_id],
-            &[original],
-        ));
+        transmit(
+            &mut link,
+            p::key_layout_packet(true, p::layout::ACTUATION, &[probe_id], &[original]),
+        );
         let restored = read_layout(&mut link, p::layout::ACTUATION, &[probe_id]);
         assert_eq!(
             restored.get(&probe_id),
@@ -1733,7 +1788,10 @@ mod hardware {
             );
 
             for target in [150u16, 350, 200] {
-                link.send(p::key_layout_packet(true, layout, &[probe_id], &[target]));
+                transmit(
+                    &mut link,
+                    p::key_layout_packet(true, layout, &[probe_id], &[target]),
+                );
                 assert_eq!(
                     read(&mut link, layout),
                     target,
@@ -1741,7 +1799,10 @@ mod hardware {
                 );
             }
 
-            link.send(p::key_layout_packet(true, layout, &[probe_id], &[original]));
+            transmit(
+                &mut link,
+                p::key_layout_packet(true, layout, &[probe_id], &[original]),
+            );
             assert_eq!(
                 read(&mut link, layout),
                 original,
@@ -1798,24 +1859,23 @@ mod hardware {
             .copied()
             .unwrap_or(0);
 
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::RT_PRESS,
-            &[probe_id],
-            &[300],
-        ));
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::RT_RELEASE,
-            &[probe_id],
-            &[400],
-        ));
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::MODE,
-            &[probe_id],
-            &[KeyMode::RapidTrigger.wire_value()],
-        ));
+        transmit(
+            &mut link,
+            p::key_layout_packet(true, p::layout::RT_PRESS, &[probe_id], &[300]),
+        );
+        transmit(
+            &mut link,
+            p::key_layout_packet(true, p::layout::RT_RELEASE, &[probe_id], &[400]),
+        );
+        transmit(
+            &mut link,
+            p::key_layout_packet(
+                true,
+                p::layout::MODE,
+                &[probe_id],
+                &[KeyMode::RapidTrigger.wire_value()],
+            ),
+        );
 
         assert_eq!(
             read_layout(&mut link, p::layout::RT_PRESS, &[probe_id]).get(&probe_id),
@@ -1846,14 +1906,15 @@ mod hardware {
             (p::layout::RT_PRESS, original_press),
             (p::layout::RT_RELEASE, original_release),
         ] {
-            link.send(p::key_layout_packet(true, layout, &[probe_id], &[value]));
+            transmit(
+                &mut link,
+                p::key_layout_packet(true, layout, &[probe_id], &[value]),
+            );
         }
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::MODE,
-            &[probe_id],
-            &[original_mode],
-        ));
+        transmit(
+            &mut link,
+            p::key_layout_packet(true, p::layout::MODE, &[probe_id], &[original_mode]),
+        );
 
         let restored = read_layout(&mut link, p::layout::MODE, &[probe_id])
             .get(&probe_id)
@@ -1903,12 +1964,10 @@ mod hardware {
             .collect();
         let restore_modes = |link: &mut Link| {
             for (id, mode) in &original_modes {
-                link.send(p::key_layout_packet(
-                    true,
-                    p::layout::MODE,
-                    &[*id],
-                    &[*mode],
-                ));
+                transmit(
+                    link,
+                    p::key_layout_packet(true, p::layout::MODE, &[*id], &[*mode]),
+                );
             }
         };
 
@@ -1923,7 +1982,7 @@ mod hardware {
                     ..p::KeyPair::CLEARED
                 },
             );
-            let r = link.query(packet)?;
+            let r = fetch(link, packet)?;
             if !r.matches(p::cmd::SOCD) || r.is_fail() {
                 return None;
             }
@@ -1931,7 +1990,7 @@ mod hardware {
         };
 
         let write = |link: &mut Link, pair: p::KeyPair| {
-            link.send(p::pair_packet(true, p::cmd::SOCD, pair));
+            transmit(link, p::pair_packet(true, p::cmd::SOCD, pair));
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
 
@@ -2051,12 +2110,10 @@ mod hardware {
                 &state,
             );
         }
-        link.send(p::key_layout_packet(
-            true,
-            p::layout::MODE,
-            &[probe_id],
-            &[original_mode],
-        ));
+        transmit(
+            &mut link,
+            p::key_layout_packet(true, p::layout::MODE, &[probe_id], &[original_mode]),
+        );
 
         let restored = read_mod_tap(&mut link, probe_id as u8).expect("Mod-Tap read after restore");
         assert_eq!(
@@ -2207,6 +2264,7 @@ mod hardware {
         let query = p::rgb_packet(false, &[[255, 0, 0]; 7], false, false, false, 0, 0, 0, 0, 0);
         let r = link
             .query(query)
+            .expect("query")
             .filter(|r| r.matches(p::cmd::RGB))
             .expect("RGB query rejected — is this firmware 9.x?");
         assert!(r.rgb_brightness() <= 4, "brightness out of range");

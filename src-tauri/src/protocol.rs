@@ -76,6 +76,50 @@ pub mod cmd {
     pub const MAX_KEYS_PER_PACKET: usize = 14;
 }
 
+/// Command ids that must never be written. See AGENTS.md.
+///
+/// 12 and 13 are bootloader `BL_WRITE` / `BL_READ` (also the order-space names
+/// `START_ADJUSTING` / `SAVE_ADJUSTING`). 45 is Rapid Switch.
+pub const FORBIDDEN_COMMANDS: [u8; 3] = [12, 13, 45];
+
+/// A frame was refused because its command id is in [`FORBIDDEN_COMMANDS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ForbiddenCommand {
+    pub id: u8,
+}
+
+impl std::fmt::Display for ForbiddenCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "command {} is on the forbidden list (AGENTS.md: never send 12/13 \
+             bootloader BL_WRITE/BL_READ or 45 Rapid Switch) and must not be sent; \
+             the list must not be relaxed",
+            self.id
+        )
+    }
+}
+
+impl std::error::Error for ForbiddenCommand {}
+
+/// Refuses an outbound frame whose command id is in [`FORBIDDEN_COMMANDS`].
+///
+/// Structured commands carry the id in byte 2. Single-value (`order`) commands
+/// carry `0` there and the id in byte 4.
+pub fn reject_forbidden(packet: &[u8; PACKET_LEN]) -> Result<(), ForbiddenCommand> {
+    let structured = packet[2];
+    if FORBIDDEN_COMMANDS.contains(&structured) {
+        return Err(ForbiddenCommand { id: structured });
+    }
+    if structured == 0 {
+        let order = packet[4];
+        if FORBIDDEN_COMMANDS.contains(&order) {
+            return Err(ForbiddenCommand { id: order });
+        }
+    }
+    Ok(())
+}
+
 /// Per-key `layout` selector inside a `KEY_LAYOUT` packet.
 ///
 /// Names and ids below are taken from the `KeyLayout` enum in the vendor's
@@ -631,6 +675,46 @@ mod tests {
         }
         buf[3] = checksum(&buf);
         buf
+    }
+
+    #[test]
+    fn reject_forbidden_blocks_bootloader_and_rapid_switch() {
+        for id in [12, 13, cmd::RAPID_SWITCH] {
+            let mut structured = [0u8; PACKET_LEN];
+            structured[0] = HEADER;
+            structured[2] = id;
+            let err = reject_forbidden(&structured).unwrap_err();
+            assert_eq!(err.id, id);
+            let message = err.to_string();
+            assert!(message.contains("forbidden list"), "{message}");
+            assert!(message.contains("AGENTS.md"), "{message}");
+            assert!(message.contains("must not be relaxed"), "{message}");
+            assert!(message.contains(&id.to_string()), "{message}");
+
+            let order = cmd_packet(id, None);
+            assert_eq!(order[2], 0, "order frames keep the id in the payload");
+            assert_eq!(reject_forbidden(&order).unwrap_err().id, id);
+        }
+    }
+
+    #[test]
+    fn reject_forbidden_allows_other_command_ids() {
+        for id in [
+            cmd::SOCD,
+            cmd::KEY_LAYOUT,
+            cmd::MOD_TAP,
+            cmd::DEADZONE,
+            cmd::RGB,
+        ] {
+            let mut structured = [0u8; PACKET_LEN];
+            structured[0] = HEADER;
+            structured[2] = id;
+            structured[4] = 45;
+            assert!(reject_forbidden(&structured).is_ok());
+        }
+        for id in [order::QUERY_NAME, order::POLLING_RATE, order::PROFILE_ID, 0] {
+            assert!(reject_forbidden(&cmd_packet(id, None)).is_ok());
+        }
     }
 
     #[test]
