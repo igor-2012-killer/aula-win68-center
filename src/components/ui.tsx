@@ -14,6 +14,8 @@ interface SliderProps {
   hint?: string;
   disabled?: boolean;
   accent?: "primary" | "rose" | "amber" | "emerald";
+  /** Optional live callback for pure UI controls; HID sliders only use onCommit. */
+  onLiveChange?: (value: number) => void;
   /**
    * Commit a value to the keyboard. Return (or resolve to) `false` when the
    * keyboard refused it, and the slider rolls the draft back to `value`
@@ -33,49 +35,64 @@ export function Slider({
   hint,
   disabled,
   accent = "primary",
+  onLiveChange,
   onCommit,
 }: SliderProps) {
   const [draft, setDraft] = useState(value);
   const dragging = useRef(false);
   const keyTimer = useRef<number | null>(null);
+  const latestValue = useRef(value);
+  latestValue.current = value;
+
+  const clearKeyTimer = () => {
+    if (keyTimer.current != null) {
+      clearTimeout(keyTimer.current);
+      keyTimer.current = null;
+    }
+  };
 
   // Follow external changes unless the user is actively dragging.
   useEffect(() => {
+    clearKeyTimer();
     if (!dragging.current) setDraft(value);
-  }, [value]);
+  }, [value, disabled]);
 
-  useEffect(
-    () => () => {
-      if (keyTimer.current != null) clearTimeout(keyTimer.current);
-    },
-    [],
-  );
+  useEffect(() => clearKeyTimer, []);
 
   const commit = (next: number) => {
+    clearKeyTimer();
     setDraft(next);
     const outcome = onCommit(next) as boolean | Promise<boolean> | undefined;
     if (outcome instanceof Promise) {
       void outcome.then((ok) => {
-        if (ok === false) setDraft(value);
+        if (ok === false) setDraft(latestValue.current);
       });
     } else if (outcome === false) {
-      setDraft(value);
+      setDraft(latestValue.current);
     }
   };
+
+  const stepStr = String(step);
+  const dotIndex = stepStr.indexOf(".");
+  const precision = Math.min(6, Math.max(digits, dotIndex === -1 ? 0 : stepStr.length - dotIndex - 1));
 
   // Arrow keys on a range input fire one `change` per press and repeat while
   // held, which would put one HID write per step on the wire. Adjust the
   // draft instead and commit once the key pauses.
   const commitSoon = (next: number) => {
-    setDraft(next);
-    if (keyTimer.current != null) clearTimeout(keyTimer.current);
+    const factor = 10 ** precision;
+    const snapped = Math.round(Math.min(max, Math.max(min, next)) * factor) / factor;
+    setDraft(snapped);
+    onLiveChange?.(snapped);
+    clearKeyTimer();
     keyTimer.current = window.setTimeout(() => {
       keyTimer.current = null;
-      onCommit(next);
+      commit(snapped);
     }, 300);
   };
 
-  const fill = max > min ? ((draft - min) / (max - min)) * 100 : 0;
+  const rawFill = max > min ? ((draft - min) / (max - min)) * 100 : 0;
+  const fill = Math.min(100, Math.max(0, rawFill));
 
   return (
     <label class={`slider slider--${accent}${disabled ? " is-disabled" : ""}`}>
@@ -98,15 +115,21 @@ export function Slider({
         disabled={disabled}
         style={{ "--fill": `${fill}%` }}
         aria-valuetext={`${draft.toFixed(digits)}${unit ? ` ${unit}` : ""}`}
-        onPointerDown={() => {
+        onPointerDown={(e) => {
           dragging.current = true;
+          clearKeyTimer();
+          try {
+            (e.currentTarget as HTMLInputElement).setPointerCapture(e.pointerId);
+          } catch {
+            /* ignore environments without pointer capture */
+          }
         }}
         onPointerUp={() => {
           dragging.current = false;
         }}
         onPointerCancel={() => {
           dragging.current = false;
-          setDraft(value);
+          setDraft(latestValue.current);
         }}
         onKeyDown={(e) => {
           const el = e.currentTarget as HTMLInputElement;
@@ -122,8 +145,15 @@ export function Slider({
             commitSoon(next);
           }
         }}
-        onInput={(e) => setDraft(Number((e.currentTarget as HTMLInputElement).value))}
-        onChange={(e) => commit(Number((e.currentTarget as HTMLInputElement).value))}
+        onInput={(e) => {
+          const next = Number((e.currentTarget as HTMLInputElement).value);
+          setDraft(next);
+          onLiveChange?.(next);
+        }}
+        onChange={(e) => {
+          dragging.current = false;
+          commit(Number((e.currentTarget as HTMLInputElement).value));
+        }}
       />
       <span class="slider__scale">
         <span>{min.toFixed(digits)}</span>
@@ -138,14 +168,15 @@ export function Slider({
 interface ToggleProps {
   label: string;
   hint?: string;
+  title?: string;
   checked: boolean;
   disabled?: boolean;
   onChange: (next: boolean) => void;
 }
 
-export function Toggle({ label, hint, checked, disabled, onChange }: ToggleProps) {
+export function Toggle({ label, hint, title, checked, disabled, onChange }: ToggleProps) {
   return (
-    <label class={`toggle${disabled ? " is-disabled" : ""}`}>
+    <label class={`toggle${disabled ? " is-disabled" : ""}`} title={title}>
       <span class="toggle__text">
         <span class="toggle__label">{label}</span>
         {hint ? <em class="toggle__hint">{hint}</em> : null}

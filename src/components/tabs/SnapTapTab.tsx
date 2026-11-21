@@ -23,19 +23,17 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
   const offline = !state.connected;
   const configured = state.snap_tap;
 
-  // The pair comes from the stored configuration, or from the first two keys
-  // of the shared selection when nothing is configured yet.
+  // Two keys selected on the diagram start or replace a pair; otherwise edit
+  // the currently configured pair.
   const pair = useMemo<[number, number] | null>(() => {
-    if (configured) return [configured.key_a, configured.key_b];
     if (selection.length >= 2) return [selection[0]!, selection[1]!];
+    if (configured) return [configured.key_a, configured.key_b];
     return null;
   }, [configured, selection]);
 
   const [mode, setMode] = useState(configured?.mode ?? 0);
   const [delay, setDelay] = useState(configured?.delay_ms ?? 0);
 
-  // Follow the stored pair so an external change (vendor driver, profile
-  // switch) is reflected; a draft survives as long as the pair does not move.
   useEffect(() => {
     setMode(configured?.mode ?? 0);
     setDelay(configured?.delay_ms ?? 0);
@@ -82,7 +80,7 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
               min={0}
               max={MAX_DELAY_MS}
               step={10}
-              unit="ms"
+              unit={t.unitMs}
               digits={0}
               accent="amber"
               disabled={offline}
@@ -116,13 +114,14 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
               ) : null}
             </div>
             {!valid ? <p class="note">{t.snapTapNeedsTwoKeys}</p> : null}
+            <p class="note">{t.snapTapReplaceHint}</p>
             <p class="note">{t.snapTapModeWarning}</p>
           </>
         )}
       </Panel>
 
       <Panel
-        title={t.snapTapTitle}
+        title={t.snapTapStatusTitle}
         description={configured ? t.snapTapActive : undefined}
       >
         {configured ? (
@@ -133,10 +132,12 @@ export function SnapTapTab({ state, lang, selection, run }: Props) {
               {modeOptions.find(([value]) => value === configured.mode)?.[1] ??
                 `#${configured.mode}`}
             </Row>
-            <Row label={t.snapTapDelay}>{configured.delay_ms} ms</Row>
+            <Row label={t.snapTapDelay}>
+              {configured.delay_ms} {t.unitMs}
+            </Row>
           </>
         ) : (
-          <p class="note">{t.snapTapNote}</p>
+          <p class="empty">{t.snapTapOff}</p>
         )}
         <p class="note">{t.snapTapNote}</p>
       </Panel>

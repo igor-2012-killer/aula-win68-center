@@ -10,12 +10,34 @@ export interface Toast {
 
 export type LinkState = "connecting" | "online" | "reconnecting" | "offline";
 
+export interface TravelBus {
+  get(): number[];
+  subscribe(listener: () => void): () => void;
+}
+
+const ZERO_TRAVEL: number[] = Object.freeze(new Array<number>(SENSOR_COUNT).fill(0)) as number[];
+
+export function useTravel(bus: TravelBus, active: boolean): number[] {
+  const [frame, setFrame] = useState<number[]>(() => (active ? bus.get() : ZERO_TRAVEL));
+
+  useEffect(() => {
+    if (!active) {
+      setFrame(ZERO_TRAVEL);
+      return;
+    }
+    setFrame(bus.get());
+    return bus.subscribe(() => setFrame(bus.get()));
+  }, [bus, active]);
+
+  return active ? frame : ZERO_TRAVEL;
+}
+
 export interface Store {
   state: KeyboardState | null;
   lang: "ru" | "en";
   selection: number[];
   selectedSet: Set<number>;
-  sensors: number[];
+  travelBus: TravelBus;
   toasts: Toast[];
   busy: boolean;
   link: { state: LinkState; detail: string | null };
@@ -38,7 +60,6 @@ export function useStore(): Store {
   const [state, setState] = useState<KeyboardState | null>(null);
   const [lang, setLang] = useState<"ru" | "en">("ru");
   const [selection, setSelection] = useState<number[]>([]);
-  const [sensors, setSensors] = useState<number[]>(() => new Array<number>(SENSOR_COUNT).fill(0));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<{ state: LinkState; detail: string | null }>({
@@ -48,10 +69,26 @@ export function useStore(): Store {
 
   const toastId = useRef(0);
   const timers = useRef<number[]>([]);
+  const busyCount = useRef(0);
+  const latestTravel = useRef<number[]>(ZERO_TRAVEL);
+  const travelListeners = useRef(new Set<() => void>());
   // The sensor stream arrives faster than React state should change. Frames
   // are coalesced: only the latest one is applied, once per animation frame.
   const pendingFrame = useRef<number[] | null>(null);
   const frameHandle = useRef<number | null>(null);
+
+  const travelBus = useMemo<TravelBus>(
+    () => ({
+      get: () => latestTravel.current,
+      subscribe: (listener) => {
+        travelListeners.current.add(listener);
+        return () => {
+          travelListeners.current.delete(listener);
+        };
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -101,7 +138,11 @@ export function useStore(): Store {
           if (frameHandle.current == null) {
             frameHandle.current = requestAnimationFrame(() => {
               frameHandle.current = null;
-              if (pendingFrame.current) setSensors(pendingFrame.current);
+              if (pendingFrame.current) {
+                latestTravel.current = pendingFrame.current;
+                pendingFrame.current = null;
+                for (const listener of travelListeners.current) listener();
+              }
             });
           }
         }),
@@ -143,6 +184,7 @@ export function useStore(): Store {
 
   const run = useCallback(
     async (task: () => Promise<unknown>) => {
+      busyCount.current += 1;
       setBusy(true);
       try {
         await task();
@@ -155,7 +197,8 @@ export function useStore(): Store {
         notify(err instanceof Error ? err.message : String(err), "error");
         return false;
       } finally {
-        setBusy(false);
+        busyCount.current -= 1;
+        if (busyCount.current === 0) setBusy(false);
       }
     },
     [notify],
@@ -186,7 +229,7 @@ export function useStore(): Store {
     lang,
     selection,
     selectedSet,
-    sensors,
+    travelBus,
     toasts,
     busy,
     link,

@@ -9,7 +9,7 @@ interface Props {
   lang: Lang;
   selection: number[];
   run: (task: () => Promise<unknown>) => Promise<boolean>;
-  notify: (text: string, tone?: "ok" | "error") => void;
+  onSelectKey: (id: number) => void;
 }
 
 /**
@@ -21,7 +21,7 @@ const MAX_DELAY_MS = 2550;
 /** The vendor driver's own default. */
 const DEFAULT_DELAY_MS = 200;
 
-export function ModTapTab({ state, lang, selection, run }: Props) {
+export function ModTapTab({ state, lang, selection, run, onSelectKey }: Props) {
   const t = STRINGS[lang];
   const offline = !state.connected;
 
@@ -78,7 +78,7 @@ export function ModTapTab({ state, lang, selection, run }: Props) {
               min={10}
               max={MAX_DELAY_MS}
               step={10}
-              unit="ms"
+              unit={t.unitMs}
               digits={0}
               accent="amber"
               disabled={offline}
@@ -127,13 +127,19 @@ export function ModTapTab({ state, lang, selection, run }: Props) {
         ) : (
           <ul class="keylist">
             {state.mod_tap.map((a) => (
-              <li class="keylist__row" key={a.key_id}>
-                <span class="keylist__cap">{label(a.key_id)}</span>
-                <span class="keylist__value">
-                  {t.modTapHold}: {a.hold_key ? label(a.hold_key) : t.modTapNoOutput} ·{" "}
-                  {t.modTapTap}: {a.tap_key ? label(a.tap_key) : t.modTapNoOutput} ·{" "}
-                  {a.delay_ms} ms
-                </span>
+              <li key={a.key_id}>
+                <button
+                  type="button"
+                  class={`keylist__row keylist__row--modtap${keyId === a.key_id ? " is-selected" : ""}`}
+                  onClick={() => onSelectKey(a.key_id)}
+                >
+                  <span class="keylist__cap">{label(a.key_id)}</span>
+                  <span class="keylist__value">
+                    {t.modTapHold}: {a.hold_key ? label(a.hold_key) : t.modTapNoOutput} ·{" "}
+                    {t.modTapTap}: {a.tap_key ? label(a.tap_key) : t.modTapNoOutput} ·{" "}
+                    {a.delay_ms} {t.unitMs}
+                  </span>
+                </button>
               </li>
             ))}
           </ul>

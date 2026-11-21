@@ -1,29 +1,25 @@
-import { useMemo } from "preact/hooks";
-import { PRESET_LABELS, STRINGS, type Lang } from "../../i18n";
+import { useEffect, useMemo, useState } from "preact/hooks";
+import { STRINGS, type Lang } from "../../i18n";
 import { api } from "../../ipc";
-import { MODE_LABEL, type KeyboardState } from "../../types";
-import { Button, Chip, Panel, Slider } from "../ui";
+import type { KeyMode, KeyboardState } from "../../types";
+import { Button, Panel, Slider } from "../ui";
 
 interface Props {
   state: KeyboardState;
   lang: Lang;
   selection: number[];
   run: (task: () => Promise<unknown>) => Promise<boolean>;
-  selectMany: (ids: number[]) => void;
-  clearSelection: () => void;
 }
 
-export function ActuationTab({
-  state,
-  lang,
-  selection,
-  run,
-  selectMany,
-  clearSelection,
-}: Props) {
+export function ActuationTab({ state, lang, selection, run }: Props) {
   const t = STRINGS[lang];
   const offline = !state.connected;
   const none = selection.length === 0;
+  const [confirmResetAll, setConfirmResetAll] = useState(false);
+
+  useEffect(() => {
+    setConfirmResetAll(false);
+  }, [offline, state.profile]);
 
   const ids = useMemo(() => [...selection], [selection]);
   const allIds = useMemo(
@@ -42,6 +38,11 @@ export function ActuationTab({
     return selection.some((id) => state.keys[id]?.mode !== first.mode);
   }, [selection, first, state.keys]);
 
+  const modeText = (mode: KeyMode) =>
+    mode === "rapidtrigger" ? t.modeRapid : mode === "single" ? t.modeSingle : t.modeGlobal;
+
+  const selectedActuation =
+    first?.mode === "single" ? first.actuation : state.global_actuation;
   const deadzonePress = first?.press_deadzone ?? state.global_press_deadzone;
   const deadzoneRelease = first?.release_deadzone ?? state.global_release_deadzone;
 
@@ -54,6 +55,7 @@ export function ActuationTab({
           min={state.min_travel}
           max={state.max_travel}
           step={state.step}
+          unit={t.unitMm}
           disabled={offline}
           onCommit={(value) => run(() => api.setGlobalActuation(value))}
         />
@@ -64,63 +66,57 @@ export function ActuationTab({
             state.step.toFixed(2),
           )}
         </p>
+        <div class="btn-row">
+          {confirmResetAll ? (
+            <>
+              <Button
+                variant="danger"
+                disabled={offline || allIds.length === 0}
+                onClick={() => {
+                  setConfirmResetAll(false);
+                  void run(() => api.resetKeys(allIds));
+                }}
+              >
+                {t.confirmResetAll}
+              </Button>
+              <Button variant="ghost" onClick={() => setConfirmResetAll(false)}>
+                {t.cancel}
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="danger"
+              disabled={offline || allIds.length === 0}
+              onClick={() => setConfirmResetAll(true)}
+            >
+              {t.resetAll}
+            </Button>
+          )}
+        </div>
       </Panel>
 
       <Panel
-        title={t.selection}
-        description={`${ids.length} ${t.selected}`}
-        actions={
-          <Button variant="ghost" disabled={none} onClick={clearSelection}>
-            {t.selectNone}
-          </Button>
+        title={t.selectedKeysTitle}
+        description={
+          none
+            ? t.noKeysSelected
+            : selection
+                .map((id) => labelById.get(id) ?? String(id))
+                .slice(0, 8)
+                .join(", ") + (selection.length > 8 ? ` +${selection.length - 8}` : "")
         }
       >
-        <div class="chips">
-          {state.presets.map(([name, preset]) => (
-            <Chip key={name} onClick={() => selectMany(preset)}>
-              {PRESET_LABELS[name]?.[lang === "ru" ? 0 : 1] ?? name}
-            </Chip>
-          ))}
-        </div>
-
-        {none ? (
-          <p class="empty">{t.noKeysSelected}</p>
-        ) : (
-          <ul class="keylist">
-            {selection.slice(0, 14).map((id) => {
-              const settings = state.keys[id];
-              const value =
-                settings?.mode === "rapidtrigger"
-                  ? `${settings.rt_press.toFixed(2)} / ${settings.rt_release.toFixed(2)}`
-                  : `${settings?.actuation.toFixed(2) ?? "—"} mm`;
-              return (
-                <li class="keylist__row" key={id}>
-                  <span class="keylist__cap">{labelById.get(id) ?? id}</span>
-                  <span class={`tag mode-${settings?.mode ?? "global"}`}>
-                    {MODE_LABEL[settings?.mode ?? "global"]}
-                  </span>
-                  <span class="keylist__value">{value}</span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {selection.length > 14 ? (
-          <p class="muted">+{selection.length - 14}</p>
-        ) : null}
-      </Panel>
-
-      <Panel title={t.mode} description={none ? undefined : ids.join(", ")}>
         <div class={`mode-pill mode-${mixed ? "mixed" : (first?.mode ?? "global")}`}>
-          {mixed ? "—" : MODE_LABEL[first?.mode ?? "global"]}
+          {mixed ? t.modeMixed : modeText(first?.mode ?? "global")}
         </div>
 
         <Slider
           label={t.selectedActuation}
-          value={first?.actuation ?? state.global_actuation}
+          value={selectedActuation}
           min={state.min_travel}
           max={state.max_travel}
           step={state.step}
+          unit={t.unitMm}
           disabled={offline || none}
           onCommit={(value) => run(() => api.setKeysActuation(ids, value))}
         />
@@ -133,16 +129,30 @@ export function ActuationTab({
           >
             {t.resetSelected}
           </Button>
-          <Button
-            variant="danger"
-            disabled={offline || allIds.length === 0}
-            onClick={() => {
-              if (confirm(t.resetAllConfirm)) void run(() => api.resetKeys(allIds));
-            }}
-          >
-            {t.resetAll}
-          </Button>
         </div>
+
+        {none ? (
+          <p class="empty">{t.noKeysSelected}</p>
+        ) : (
+          <ul class="keylist">
+            {selection.slice(0, 14).map((id) => {
+              const settings = state.keys[id];
+              const mode = settings?.mode ?? "global";
+              const value =
+                mode === "rapidtrigger"
+                  ? `${settings!.rt_press.toFixed(2)} / ${settings!.rt_release.toFixed(2)} ${t.unitMm}`
+                  : `${(mode === "single" ? settings!.actuation : state.global_actuation).toFixed(2)} ${t.unitMm}`;
+              return (
+                <li class="keylist__row" key={id}>
+                  <span class="keylist__cap">{labelById.get(id) ?? id}</span>
+                  <span class={`tag mode-${mode}`}>{modeText(mode)}</span>
+                  <span class="keylist__value">{value}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {selection.length > 14 ? <p class="muted">+{selection.length - 14}</p> : null}
       </Panel>
 
       <Panel title={t.deadzone} description={t.deadzoneHint} wide>
@@ -152,6 +162,7 @@ export function ActuationTab({
           min={0}
           max={0.5}
           step={0.01}
+          unit={t.unitMm}
           disabled={offline || none}
           accent="emerald"
           onCommit={(value) => run(() => api.setKeysDeadzone(ids, value, deadzoneRelease))}
@@ -162,6 +173,7 @@ export function ActuationTab({
           min={0}
           max={0.5}
           step={0.01}
+          unit={t.unitMm}
           disabled={offline || none}
           accent="emerald"
           onCommit={(value) => run(() => api.setKeysDeadzone(ids, deadzonePress, value))}

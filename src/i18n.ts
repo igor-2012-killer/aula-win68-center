@@ -15,8 +15,13 @@ interface Strings {
   navSensors: string;
   navSystem: string;
 
+  unitMm: string;
+  unitMs: string;
+
   snapTapTitle: string;
   snapTapHint: string;
+  snapTapStatusTitle: string;
+  snapTapOff: string;
   snapTapActive: string;
   snapTapFirstKey: string;
   snapTapSecondKey: string;
@@ -29,6 +34,7 @@ interface Strings {
   snapTapSave: string;
   snapTapDisable: string;
   snapTapNeedsTwoKeys: string;
+  snapTapReplaceHint: string;
   snapTapNote: string;
   snapTapModeWarning: string;
 
@@ -47,35 +53,36 @@ interface Strings {
   modTapNote: string;
   modTapClearNote: string;
 
-  selection: string;
   selectNone: string;
   selected: string;
+  selectedKeysTitle: string;
   key: string;
   noKeysSelected: string;
   mode: string;
   modeGlobal: string;
   modeSingle: string;
   modeRapid: string;
+  modeMixed: string;
 
   globalActuation: string;
   globalActuationHint: string;
   selectedActuation: string;
-  applyAll: string;
-  applySelected: string;
   resetSelected: string;
   resetAll: string;
-  resetAllConfirm: string;
+  confirmResetAll: string;
+  cancel: string;
   keyboardRangeNote: (min: string, max: string, step: string) => string;
 
   rapidTrigger: string;
   rapidHint: string;
   rapidNote: string;
+  rapidSliderNote: string;
   sensitivity: string;
   enabledForSelection: string;
   disabledForSelection: string;
+  mixedForSelection: string;
   pressSensitivity: string;
   releaseSensitivity: string;
-  enableOnSelected: string;
   disableOnSelected: string;
   quickPresets: string;
   quickPresetsHint: string;
@@ -85,10 +92,11 @@ interface Strings {
   deadzoneNote: string;
   pressDeadzone: string;
   releaseDeadzone: string;
-  applyDeadzone: string;
 
   lighting: string;
   effect: string;
+  lightingNormal: string;
+  lightingFill: string;
   effectName: string;
   brightness: string;
   speed: string;
@@ -107,15 +115,38 @@ interface Strings {
   sleepLabels: Readonly<Record<number, string>>;
 
   sensors: string;
+  sensorsSubMonitor: string;
+  sensorsSubRecording: string;
+  practiceTitle: string;
+  practiceHint: string;
+  practiceSteps: string;
+  practiceSelect: string;
+  practicePeak: string;
+  practiceReset: string;
+  practiceLive: string;
+  practiceStart: string;
+  practiceSelectZX: string;
+  practiceAnyKeys: string;
+  practiceMode: string;
+  practiceActuation: string;
+  practiceTuneActuation: string;
+  practiceTuneRapid: string;
+  practiceGuideTitle: string;
+  practiceGuideHint: string;
+  practiceGuideObserve: string;
+  practiceGuideActuation: string;
+  practiceGuideRapid: string;
+  practiceGuideCompare: string;
+  practiceGuideLimit: string;
   sensorsHint: string;
   sensorsIdle: string;
   streaming: string;
   streamingHint: string;
+  sensorStreamError: string;
   activeSensors: string;
   channels: string;
   peak: string;
   peakReset: string;
-  readout: string;
   on: string;
   off: string;
 
@@ -146,9 +177,37 @@ interface Strings {
   language: string;
   linking: string;
   deckHint: string;
+  liveTravel: string;
+  liveTravelHint: string;
+  liveTravelReadout: string;
+  legendMark: string;
+  legendFired: string;
+  legendSnapTap: string;
+  legendModTap: string;
 }
 
 const ru: Strings = {
+  practiceTitle: "Тренировка нажатий",
+  practiceHint: "Посмотрите, как двигаются ваши игровые клавиши",
+  practiceSteps: "Выберите клавиши на схеме, включите поток датчиков и сыграйте короткий отрывок. Сравните ход и пики, затем настройте срабатывание и Rapid Trigger по ощущениям. Это наблюдение, не калибровка датчиков.",
+  practiceSelect: "Выберите игровые клавиши на схеме выше, например Z и X.",
+  practicePeak: "Максимум",
+  practiceReset: "Новая попытка",
+  practiceLive: "Максимум сохраняется до новой попытки или смены выбора. Очень короткий пик может не попасть в кадр.",
+  practiceStart: "Включите поток датчиков, чтобы начать.",
+  practiceSelectZX: "Выбрать Z + X",
+  practiceAnyKeys: "Или выберите любые клавиши на схеме.",
+  practiceMode: "Режим",
+  practiceActuation: "Срабатывание",
+  practiceTuneActuation: "Срабатывание",
+  practiceTuneRapid: "Rapid Trigger",
+  practiceGuideTitle: "Подбор под себя",
+  practiceGuideHint: "Настраивайте каждую клавишу по отдельности",
+  practiceGuideObserve: "Включите поток и сыграйте привычный короткий рисунок. Повторите несколько раз, сравнивая Z и X; максимум показывает глубину, а не качество нажатий.",
+  practiceGuideActuation: "Для обычного режима выберите срабатывание у нужной клавиши. Если лёгкие нажатия не регистрируются, попробуйте меньшую глубину; при случайных нажатиях — большую.",
+  practiceGuideRapid: "Для Rapid Trigger меняйте чувствительность малыми шагами и проверяйте быстрые повторы. Если появляются лишние нажатия, попробуйте увеличить значения. Срабатывание и Rapid Trigger переключают режим клавиши: настройка одного может отключить другой.",
+  practiceGuideCompare: "После каждого изменения сыграйте тот же отрывок и оцените пропуски, лишние нажатия и комфорт. Повторите отдельно для второй клавиши.",
+  practiceGuideLimit: "Показания датчиков не фиксируют игровые события и не определяют оптимальные значения автоматически. До экспериментов можно экспортировать конфигурацию во вкладке «Система»; Snap Tap и Mod-Tap в экспорт не входят.",
   appTitle: "Панель управления",
   connected: "Подключена",
   disconnected: "Не найдена",
@@ -163,8 +222,13 @@ const ru: Strings = {
   navSensors: "Датчики",
   navSystem: "Система",
 
+  unitMm: "мм",
+  unitMs: "мс",
+
   snapTapTitle: "Snap Tap",
   snapTapHint: "Пока обе клавиши зажаты, резолвер решает, какая из них печатает",
+  snapTapStatusTitle: "Текущая пара",
+  snapTapOff: "Snap Tap выключен.",
   snapTapActive: "Snap Tap настроен",
   snapTapFirstKey: "Первая клавиша",
   snapTapSecondKey: "Вторая клавиша",
@@ -176,7 +240,8 @@ const ru: Strings = {
   snapTapDelay: "Задержка",
   snapTapSave: "Применить",
   snapTapDisable: "Выключить Snap Tap",
-  snapTapNeedsTwoKeys: "Выберите две разные клавиши в схеме выше",
+  snapTapNeedsTwoKeys: "Выберите две разные клавиши на схеме выше",
+  snapTapReplaceHint: "Выберите две клавиши на схеме, чтобы задать или заменить пару.",
   snapTapNote:
     "Семантика снята с драйвера производителя кадр-в-кадр и подтверждена нажатиями на клавиатуре. Пороги резолвера (DKSV) в рабочем потоке всегда нулевые — интерфейс их не показывает. Кадры для всех четырёх режимов закреплены тестами.",
   snapTapModeWarning:
@@ -199,24 +264,24 @@ const ru: Strings = {
   modTapClearNote:
     "Сброс убирает назначение и снимает флаг расширенной клавиши, сохраняя обычный режим клавиши.",
 
-  selection: "Выбор клавиш",
   selectNone: "Снять всё",
   selected: "выбрано",
+  selectedKeysTitle: "Выбранные клавиши",
   key: "Клавиша",
   noKeysSelected: "Клавиши не выбраны",
   mode: "Режим",
   modeGlobal: "Глобальный",
   modeSingle: "Своя точка",
   modeRapid: "Rapid Trigger",
+  modeMixed: "Смешанный",
 
   globalActuation: "Общая точка срабатывания",
   globalActuationHint: "Значение для всех клавиш в глобальном режиме",
   selectedActuation: "Точка срабатывания выбранных",
-  applyAll: "Применить ко всем",
-  applySelected: "Применить к выбранным",
   resetSelected: "Вернуть к глобальной",
   resetAll: "Сбросить все клавиши",
-  resetAllConfirm: "Сбросить все 68 клавиш к глобальному режиму?",
+  confirmResetAll: "Подтвердить сброс",
+  cancel: "Отмена",
   keyboardRangeNote: (min, max, step) =>
     `Диапазон клавиатуры: ${min} – ${max} мм, шаг ${step} мм`,
 
@@ -224,12 +289,14 @@ const ru: Strings = {
   rapidHint: "Мгновенный отпуск при обратном ходе пальца",
   rapidNote:
     "Rapid Trigger задаётся на конкретные клавиши — выберите их на схеме сверху.",
+  rapidSliderNote:
+    "Изменение чувствительности включает Rapid Trigger на выбранных клавишах и заменяет режим обычного срабатывания.",
   sensitivity: "Чувствительность",
   enabledForSelection: "Rapid Trigger включён для выбранных",
   disabledForSelection: "Rapid Trigger выключен для выбранных",
+  mixedForSelection: "Rapid Trigger включён на части клавиш",
   pressSensitivity: "Чувствительность нажатия",
   releaseSensitivity: "Чувствительность отпускания",
-  enableOnSelected: "Включить на выбранных",
   disableOnSelected: "Выключить на выбранных",
   quickPresets: "Готовые пресеты",
   quickPresetsHint: "Типичные значения для популярных игр",
@@ -240,10 +307,11 @@ const ru: Strings = {
     "Глобальные мёртвые зоны в прошивке 9.1 доступны только для чтения, поэтому применяются к выбранным клавишам.",
   pressDeadzone: "Зона нажатия",
   releaseDeadzone: "Зона отпускания",
-  applyDeadzone: "Применить мёртвые зоны",
 
   lighting: "Подсветка",
   effect: "Режим",
+  lightingNormal: "Обычный",
+  lightingFill: "Заливка",
   effectName: "Эффект",
   brightness: "Яркость",
   speed: "Скорость",
@@ -293,15 +361,17 @@ const ru: Strings = {
   },
 
   sensors: "Мониторинг датчиков",
+  sensorsSubMonitor: "Мониторинг",
+  sensorsSubRecording: "Запись и osu!",
   sensorsHint: "Живое значение хода штока по датчикам Холла",
   sensorsIdle: "Включите поток, чтобы увидеть ход штока в реальном времени.",
   streaming: "Поток данных",
-  streamingHint: "Опрос матрицы датчиков 63 раз в секунду",
+  streamingHint: "Опрос матрицы датчиков 63 раза в секунду",
+  sensorStreamError: "Не удалось переключить поток датчиков. Проверьте подключение клавиатуры и попробуйте снова.",
   activeSensors: "активных датчиков",
   channels: "каналов в матрице",
   peak: "Пик",
   peakReset: "Сбросить пики",
-  readout: "Показания",
   on: "вкл",
   off: "выкл",
 
@@ -333,10 +403,38 @@ const ru: Strings = {
 
   language: "Язык",
   linking: "Подключение…",
-  deckHint: "Ctrl / Shift + клик — мультивыбор",
+  deckHint: "Клик или протаскивание выбирает клавиши. Ctrl / Shift + клик — добавить",
+  liveTravel: "Ход на клавишах",
+  liveTravelHint: "Глубина нажатия прямо на схеме. Это тот же поток, что на вкладке «Датчики».",
+  liveTravelReadout: "Ход",
+  legendMark: "Точка срабатывания",
+  legendFired: "Сработала",
+  legendSnapTap: "Snap Tap",
+  legendModTap: "Mod-Tap",
 };
 
 const en: Strings = {
+  practiceTitle: "Keystroke practice",
+  practiceHint: "See how your game keys move",
+  practiceSteps: "Select keys on the diagram, enable the sensor stream and play a short passage. Compare travel and peaks, then adjust actuation and Rapid Trigger to feel. This is observation, not sensor calibration.",
+  practiceSelect: "Select your game keys on the diagram above, for example Z and X.",
+  practicePeak: "Peak",
+  practiceReset: "New attempt",
+  practiceLive: "Peaks are retained until a new attempt or selection change. Very short peaks may be missed.",
+  practiceStart: "Enable the sensor stream to begin.",
+  practiceSelectZX: "Select Z + X",
+  practiceAnyKeys: "Or select any keys on the diagram.",
+  practiceMode: "Mode",
+  practiceActuation: "Actuation",
+  practiceTuneActuation: "Actuation",
+  practiceTuneRapid: "Rapid Trigger",
+  practiceGuideTitle: "Tune to your playing",
+  practiceGuideHint: "Adjust each key individually",
+  practiceGuideObserve: "Start the stream and play a familiar short pattern. Repeat and compare Z and X; the peak shows depth, not the quality of a press.",
+  practiceGuideActuation: "For normal mode, choose actuation for one key. If light presses do not register, try a lower depth; for accidental presses, try a higher one.",
+  practiceGuideRapid: "For Rapid Trigger, change sensitivity in small steps and test fast repetitions. If extra presses occur, try higher values. Actuation and Rapid Trigger change the key mode: adjusting one can disable the other.",
+  practiceGuideCompare: "After each change, play the same passage and assess misses, extra presses and comfort. Repeat for the other key.",
+  practiceGuideLimit: "Sensor readings do not capture game events or automatically determine optimal values. You can export your configuration from System before experimenting; Snap Tap and Mod-Tap are not included.",
   appTitle: "Control Panel",
   connected: "Connected",
   disconnected: "Not found",
@@ -351,8 +449,13 @@ const en: Strings = {
   navSensors: "Sensors",
   navSystem: "System",
 
+  unitMm: "mm",
+  unitMs: "ms",
+
   snapTapTitle: "Snap Tap",
   snapTapHint: "While both keys are held, the resolver decides which one types",
+  snapTapStatusTitle: "Active pair",
+  snapTapOff: "Snap Tap is off.",
   snapTapActive: "Snap Tap configured",
   snapTapFirstKey: "First key",
   snapTapSecondKey: "Second key",
@@ -365,6 +468,7 @@ const en: Strings = {
   snapTapSave: "Apply",
   snapTapDisable: "Disable Snap Tap",
   snapTapNeedsTwoKeys: "Pick two different keys in the diagram above",
+  snapTapReplaceHint: "Select two keys on the diagram to set or replace the pair.",
   snapTapNote:
     "Semantics captured frame-for-frame from the vendor driver and confirmed by pressing keys on the board. The resolver thresholds (DKSV) are always zero in the working flow, so the UI does not expose them. All four mode frames are pinned by tests.",
   snapTapModeWarning:
@@ -387,36 +491,37 @@ const en: Strings = {
   modTapClearNote:
     "Removing the assignment also clears the advanced-key flag and keeps the key's ordinary mode.",
 
-  selection: "Key selection",
   selectNone: "Clear",
   selected: "selected",
+  selectedKeysTitle: "Selected keys",
   key: "Key",
   noKeysSelected: "No keys selected",
   mode: "Mode",
   modeGlobal: "Global",
   modeSingle: "Custom point",
   modeRapid: "Rapid Trigger",
+  modeMixed: "Mixed",
 
   globalActuation: "Global actuation point",
   globalActuationHint: "Value used by every key in global mode",
   selectedActuation: "Selected keys actuation",
-  applyAll: "Apply to all",
-  applySelected: "Apply to selected",
   resetSelected: "Back to global",
   resetAll: "Reset every key",
-  resetAllConfirm: "Reset all 68 keys to global mode?",
+  confirmResetAll: "Confirm reset",
+  cancel: "Cancel",
   keyboardRangeNote: (min, max, step) =>
     `Keyboard range: ${min} – ${max} mm, step ${step} mm`,
 
   rapidTrigger: "Rapid Trigger",
   rapidHint: "Instant reset when the finger reverses direction",
   rapidNote: "Rapid Trigger is configured per key — pick them in the diagram above.",
+  rapidSliderNote: "Adjusting sensitivity enables Rapid Trigger on selected keys, replacing normal actuation mode.",
   sensitivity: "Sensitivity",
   enabledForSelection: "Rapid Trigger enabled for the selected keys",
   disabledForSelection: "Rapid Trigger disabled for the selected keys",
+  mixedForSelection: "Rapid Trigger enabled on some keys",
   pressSensitivity: "Press sensitivity",
   releaseSensitivity: "Release sensitivity",
-  enableOnSelected: "Enable on selected",
   disableOnSelected: "Disable on selected",
   quickPresets: "Presets",
   quickPresetsHint: "Typical values for popular shooters",
@@ -427,10 +532,11 @@ const en: Strings = {
     "Global deadzones are read-only on firmware 9.1, so they are written per key instead.",
   pressDeadzone: "Press deadzone",
   releaseDeadzone: "Release deadzone",
-  applyDeadzone: "Apply deadzones",
 
   lighting: "Lighting",
   effect: "Mode",
+  lightingNormal: "Normal",
+  lightingFill: "Fill",
   effectName: "Effect",
   brightness: "Brightness",
   speed: "Speed",
@@ -479,15 +585,17 @@ const en: Strings = {
   },
 
   sensors: "Sensor monitor",
+  sensorsSubMonitor: "Monitor",
+  sensorsSubRecording: "Recording & osu!",
   sensorsHint: "Live stem travel measured by the Hall sensors",
   sensorsIdle: "Turn the stream on to watch the stems move in real time.",
   streaming: "Data stream",
   streamingHint: "Polls the sensor matrix about 63 times per second",
+  sensorStreamError: "Could not change the sensor stream. Check the keyboard connection and try again.",
   activeSensors: "active sensors",
   channels: "channels in the matrix",
   peak: "Peak",
   peakReset: "Reset peaks",
-  readout: "Readout",
   on: "ON",
   off: "OFF",
 
@@ -519,7 +627,14 @@ const en: Strings = {
 
   language: "Language",
   linking: "Connecting…",
-  deckHint: "Ctrl / Shift + click to multi-select",
+  deckHint: "Click or drag to select keys. Ctrl / Shift + click adds",
+  liveTravel: "Key travel",
+  liveTravelHint: "Press depth drawn on the keys. This is the same stream as the Sensors tab.",
+  liveTravelReadout: "Travel",
+  legendMark: "Actuation point",
+  legendFired: "Actuated",
+  legendSnapTap: "Snap Tap",
+  legendModTap: "Mod-Tap",
 };
 
 export const STRINGS: Record<Lang, Strings> = { ru, en };

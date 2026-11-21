@@ -1,7 +1,7 @@
 import { useRef, useState } from "preact/hooks";
 import { STRINGS, type Lang } from "../../i18n";
 import { api } from "../../ipc";
-import { POLLING_RATES, PROFILE_COUNT, type KeyMode, type KeyboardState } from "../../types";
+import { POLLING_RATES, PROFILE_COUNT, type KeyMode, type KeyboardState, type Lighting } from "../../types";
 import { Button, Panel, Row, Segmented, Stat } from "../ui";
 
 interface Props {
@@ -14,26 +14,62 @@ interface Props {
 /** Bumped whenever the export shape changes. */
 const CONFIG_VERSION = 1;
 
+interface ExportedKey {
+  actuation: number;
+  rt_press: number;
+  rt_release: number;
+  press_deadzone: number;
+  release_deadzone: number;
+  mode: KeyMode;
+}
+
 interface ExportedConfig {
   app: "aula-win68-center";
   version: number;
   exported: string;
   global_actuation: number;
-  keys: Record<
-    string,
-    {
-      actuation: number;
-      rt_press: number;
-      rt_release: number;
-      press_deadzone: number;
-      release_deadzone: number;
-      mode: KeyMode;
-    }
-  >;
-  lighting: KeyboardState["lighting"];
+  keys: Record<string, ExportedKey>;
+  lighting: Lighting;
   polling_rate: number;
   profile: number;
   mac_layout: boolean;
+}
+
+function isValidKeyEntry(value: unknown): value is ExportedKey {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value as Record<string, unknown>;
+  const finite = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+  return (
+    (entry.mode === "global" || entry.mode === "single" || entry.mode === "rapidtrigger") &&
+    finite(entry.actuation) &&
+    finite(entry.rt_press) &&
+    finite(entry.rt_release) &&
+    finite(entry.press_deadzone) &&
+    finite(entry.release_deadzone)
+  );
+}
+
+function isValidLighting(value: unknown): value is Lighting {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const l = value as Record<string, unknown>;
+  return (
+    typeof l.enabled === "boolean" &&
+    typeof l.effect === "number" &&
+    Number.isFinite(l.effect) &&
+    typeof l.brightness === "number" &&
+    Number.isFinite(l.brightness) &&
+    typeof l.speed === "number" &&
+    Number.isFinite(l.speed) &&
+    typeof l.reversed === "boolean" &&
+    typeof l.super_response === "boolean" &&
+    typeof l.sleep_minutes === "number" &&
+    Number.isFinite(l.sleep_minutes) &&
+    typeof l.static_effect === "number" &&
+    Number.isFinite(l.static_effect) &&
+    Array.isArray(l.colors) &&
+    l.colors.length === 7 &&
+    l.colors.every((c) => typeof c === "string")
+  );
 }
 
 function buildConfig(state: KeyboardState): ExportedConfig {
@@ -82,80 +118,115 @@ export function SystemTab({ state, lang, run, notify }: Props) {
     anchor.href = url;
     anchor.download = `aula-win68-config-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const importConfig = async (file: File) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      notify(t.importInvalid, "error");
+      return;
+    }
+    const config = parsed as Partial<ExportedConfig> | null;
+    if (
+      !config ||
+      config.app !== "aula-win68-center" ||
+      typeof config.version !== "number" ||
+      !isValidLighting(config.lighting) ||
+      !config.keys ||
+      typeof config.keys !== "object" ||
+      Array.isArray(config.keys)
+    ) {
+      notify(t.importInvalid, "error");
+      return;
+    }
+
+    const keysRecord = config.keys as Record<string, unknown>;
+    const validIds = Object.keys(keysRecord)
+      .map(Number)
+      .filter((id) => state.keys[id] != null && isValidKeyEntry(keysRecord[String(id)]));
+
     setImporting(true);
     try {
-      const parsed: unknown = JSON.parse(await file.text());
-      const config = parsed as Partial<ExportedConfig> | null;
-      if (
-        !config ||
-        config.app !== "aula-win68-center" ||
-        typeof config.version !== "number" ||
-        !config.lighting ||
-        !config.keys
-      ) {
-        notify(t.importInvalid, "error");
-        return;
-      }
-
-      // Serialised by the backend's job queue; each write is validated and
-      // clamped there.
-      if (typeof config.global_actuation === "number") {
-        await api.setGlobalActuation(config.global_actuation);
-      }
-      await api.setLighting(config.lighting);
-      if (typeof config.polling_rate === "number") {
-        await api.setPollingRate(config.polling_rate).catch(() => undefined);
-      }
-      if (typeof config.profile === "number") {
-        await api.setProfile(config.profile).catch(() => undefined);
-      }
-      if (typeof config.mac_layout === "boolean") {
-        await api.setOsMode(config.mac_layout);
-      }
-
-      const ids = Object.keys(config.keys)
-        .map(Number)
-        .filter((id) => state.keys[id] != null);
-      const byMode = (mode: string) => ids.filter((id) => config.keys![id]?.mode === mode);
-
-      const singles = byMode("single");
-      for (const id of singles) {
-        await api.setKeysActuation([id], config.keys![id]!.actuation);
-      }
-      const rapid = byMode("rapidtrigger");
-      if (rapid.length > 0) {
-        await api.setKeysRapidTrigger(
-          rapid,
-          true,
-          config.keys![rapid[0]!]!.rt_press,
-          config.keys![rapid[0]!]!.rt_release,
-        );
-        for (const id of rapid.slice(1)) {
-          await api.setKeysRapidTrigger(
-            [id],
-            true,
-            config.keys![id]!.rt_press,
-            config.keys![id]!.rt_release,
-          );
+      const ok = await run(async () => {
+        if (
+          typeof config.profile === "number" &&
+          Number.isInteger(config.profile) &&
+          config.profile >= 0 &&
+          config.profile < PROFILE_COUNT &&
+          config.profile !== state.profile
+        ) {
+          await api.setProfile(config.profile);
         }
-      }
-      const deadzones = ids.filter(
-        (id) =>
-          config.keys![id]!.press_deadzone !== state.keys[id]?.press_deadzone ||
-          config.keys![id]!.release_deadzone !== state.keys[id]?.release_deadzone,
-      );
-      for (const id of deadzones) {
-        await api.setKeysDeadzone([id], config.keys![id]!.press_deadzone, config.keys![id]!.release_deadzone);
-      }
+        if (typeof config.mac_layout === "boolean") {
+          await api.setOsMode(config.mac_layout);
+        }
+        if (typeof config.global_actuation === "number" && Number.isFinite(config.global_actuation)) {
+          await api.setGlobalActuation(config.global_actuation);
+        }
+        await api.setLighting(config.lighting!);
 
-      await api.refresh();
-      notify(t.importDone);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : String(err), "error");
+        const globals = validIds.filter((id) => (keysRecord[String(id)] as ExportedKey).mode === "global");
+        if (globals.length > 0) {
+          await api.resetKeys(globals);
+        }
+
+        const singleGroups = new Map<string, { actuation: number; ids: number[] }>();
+        const rapidGroups = new Map<string, { press: number; release: number; ids: number[] }>();
+        const deadzoneGroups = new Map<string, { press: number; release: number; ids: number[] }>();
+
+        for (const id of validIds) {
+          const entry = keysRecord[String(id)] as ExportedKey;
+          if (entry.mode === "single") {
+            const key = entry.actuation.toFixed(2);
+            const group = singleGroups.get(key) ?? { actuation: entry.actuation, ids: [] };
+            group.ids.push(id);
+            singleGroups.set(key, group);
+          } else if (entry.mode === "rapidtrigger") {
+            const key = `${entry.rt_press.toFixed(2)}:${entry.rt_release.toFixed(2)}`;
+            const group = rapidGroups.get(key) ?? {
+              press: entry.rt_press,
+              release: entry.rt_release,
+              ids: [],
+            };
+            group.ids.push(id);
+            rapidGroups.set(key, group);
+          }
+
+          const dzKey = `${entry.press_deadzone.toFixed(2)}:${entry.release_deadzone.toFixed(2)}`;
+          const dzGroup = deadzoneGroups.get(dzKey) ?? {
+            press: entry.press_deadzone,
+            release: entry.release_deadzone,
+            ids: [],
+          };
+          dzGroup.ids.push(id);
+          deadzoneGroups.set(dzKey, dzGroup);
+        }
+
+        for (const group of singleGroups.values()) {
+          await api.setKeysActuation(group.ids, group.actuation);
+        }
+        for (const group of rapidGroups.values()) {
+          await api.setKeysRapidTrigger(group.ids, true, group.press, group.release);
+        }
+        for (const group of deadzoneGroups.values()) {
+          await api.setKeysDeadzone(group.ids, group.press, group.release);
+        }
+
+        const rateChanged =
+          typeof config.polling_rate === "number" &&
+          POLLING_RATES.some(([idx]) => idx === config.polling_rate) &&
+          config.polling_rate !== state.polling_rate;
+        if (rateChanged) {
+          // Changing polling rate drops the USB handle; the watchdog refreshes once re-enumerated.
+          await api.setPollingRate(config.polling_rate!);
+        } else {
+          await api.refresh();
+        }
+      });
+      if (ok) notify(t.importDone);
     } finally {
       setImporting(false);
     }
@@ -176,7 +247,7 @@ export function SystemTab({ state, lang, run, notify }: Props) {
               <span class="rate__hz">{hz >= 1000 ? `${hz / 1000}k` : hz}</span>
               <span class="rate__unit">Hz</span>
               <span class="rate__delay">
-                {(1000 / hz).toFixed(3)} ms
+                {(1000 / hz).toFixed(3)} {t.unitMs}
               </span>
             </button>
           ))}
@@ -185,7 +256,7 @@ export function SystemTab({ state, lang, run, notify }: Props) {
       </Panel>
 
       <Panel title={t.profile} description={t.profileHint}>
-        <div class="rate-grid rate-grid--profiles">
+        <div class="rate-grid">
           {Array.from({ length: PROFILE_COUNT }, (_, index) => (
             <button
               key={index}
@@ -249,9 +320,9 @@ export function SystemTab({ state, lang, run, notify }: Props) {
           <Stat label={t.firmware} value={state.firmware || "—"} />
           <Stat
             label={t.range}
-            value={`${state.min_travel.toFixed(2)} – ${state.max_travel.toFixed(2)} mm`}
+            value={`${state.min_travel.toFixed(2)} – ${state.max_travel.toFixed(2)} ${t.unitMm}`}
           />
-          <Stat label={t.step} value={`${state.step.toFixed(2)} mm`} />
+          <Stat label={t.step} value={`${state.step.toFixed(2)} ${t.unitMm}`} />
           <Stat label={t.pollingRate} value={rateLabel ? `${rateLabel} Hz` : "—"} tone="primary" />
           <Stat label={t.profile} value={`${state.profile + 1} / ${PROFILE_COUNT}`} tone="primary" />
         </div>

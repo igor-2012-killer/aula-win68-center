@@ -57,7 +57,7 @@ export function LightingTab({ state, lang, run }: Props) {
         <Row label={t.effect}>
           <Segmented
             value={lighting.static_effect}
-            options={[[0, lang === "ru" ? "Обычный" : "Normal"], [1, lang === "ru" ? "Заливка" : "Fill"]] as const}
+            options={[[0, t.lightingNormal], [1, t.lightingFill]] as const}
             disabled={offline}
             onChange={(static_effect) => void apply({ static_effect })}
           />
