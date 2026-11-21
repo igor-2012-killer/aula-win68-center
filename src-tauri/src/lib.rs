@@ -288,7 +288,7 @@ pub fn run() {
             let device = Device::new();
             device.attach(handle);
             app.manage(device);
-            app.manage(Arc::new(raw_recording::Recorder::default()));
+            app.manage(Arc::new(raw_recording::Recorder::new()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

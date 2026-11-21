@@ -503,6 +503,10 @@ mod isolated {
     }
 
     impl Recorder {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
         pub fn start(&self) -> Result<(), String> {
             let mut slot = self.session.lock().map_err(|e| e.to_string())?;
             if slot.is_some() {
@@ -607,6 +611,10 @@ pub fn run_helper() {
 pub struct Recorder;
 #[cfg(not(windows))]
 impl Recorder {
+    pub fn new() -> Self {
+        Self
+    }
+
     pub fn start(&self) -> Result<(), String> {
         Err("Background key recording is only supported on Windows".into())
     }
