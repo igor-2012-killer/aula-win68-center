@@ -140,14 +140,6 @@ pub fn presets() -> Vec<(&'static str, Vec<u16>)> {
     ]
 }
 
-/// HID usage id -> human readable name, used by the SOCD key pickers.
-pub fn key_name(id: u16) -> String {
-    KEYS.iter()
-        .find(|k| k.id == id)
-        .map(|k| k.label.to_string())
-        .unwrap_or_else(|| format!("#{id}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

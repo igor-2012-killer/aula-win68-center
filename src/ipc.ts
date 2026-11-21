@@ -8,6 +8,8 @@ import {
   type IpcEvents,
 } from "./generated/ipc";
 
+export type { KeyEvent as RecordedKeyEvent, Recording as KeyRecording } from "./generated/ipc";
+
 export const EVT_STATE = EVENT_STATE;
 export const EVT_TRAVEL = EVENT_TRAVEL;
 export const EVT_STATUS = EVENT_STATUS;
@@ -60,7 +62,6 @@ const commands = {
   reset_keys: (keyIds: number[]) => call("reset_keys", { keyIds }),
   set_snap_tap: (pair: CommandArgs<"set_snap_tap">["pair"]) => call("set_snap_tap", { pair }),
   clear_snap_tap: () => call("clear_snap_tap"),
-  list_mod_tap: () => call("list_mod_tap"),
   scan_mod_tap: (keyIds: number[]) => call("scan_mod_tap", { keyIds }),
   set_mod_tap: (assignment: CommandArgs<"set_mod_tap">["assignment"]) =>
     call("set_mod_tap", { assignment }),
@@ -70,7 +71,8 @@ const commands = {
   set_profile: (index: number) => call("set_profile", { index }),
   set_os_mode: (mac: boolean) => call("set_os_mode", { mac }),
   set_streaming: (on: boolean) => call("set_streaming", { on }),
-  key_name: (id: number) => call("key_name", { id }),
+  start_key_recording: () => call("start_key_recording"),
+  stop_key_recording: () => call("stop_key_recording"),
 } satisfies { [K in keyof IpcCommands]: unknown };
 
 export const api = {
@@ -84,7 +86,6 @@ export const api = {
   resetKeys: commands.reset_keys,
   setSnapTap: commands.set_snap_tap,
   clearSnapTap: commands.clear_snap_tap,
-  listModTap: commands.list_mod_tap,
   scanModTap: commands.scan_mod_tap,
   setModTap: commands.set_mod_tap,
   clearModTap: commands.clear_mod_tap,
@@ -93,7 +94,8 @@ export const api = {
   setProfile: commands.set_profile,
   setOsMode: commands.set_os_mode,
   setStreaming: commands.set_streaming,
-  keyName: commands.key_name,
+  startKeyRecording: commands.start_key_recording,
+  stopKeyRecording: commands.stop_key_recording,
 };
 
 export function onState(cb: (state: IpcEvents[typeof EVENT_STATE]) => void): Promise<UnlistenFn> {

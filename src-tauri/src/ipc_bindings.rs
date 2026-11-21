@@ -13,6 +13,7 @@ use syn::{Ident, Type};
 use ts_rs::TS;
 
 use crate::keymap;
+use crate::raw_recording;
 use crate::state::{KeyMode, KeySettings, KeyboardState, Lighting, ModTapAssignment, SnapTap};
 
 const BINDINGS_RELATIVE: &str = "../src/generated/ipc.ts";
@@ -194,6 +195,8 @@ fn exported_state_types() -> Vec<StateType> {
         declare::<ModTapAssignment>(),
         declare::<keymap::KeyDef>(),
         declare::<KeyboardState>(),
+        declare::<raw_recording::KeyEvent>(),
+        declare::<raw_recording::Recording>(),
     ]
 }
 
@@ -249,6 +252,17 @@ fn assert_serde_matches_typescript() {
     });
     assert_object_fields(&keymap::KEYS[0]);
     assert_object_fields(&KeyboardState::default());
+    assert_object_fields(&raw_recording::KeyEvent {
+        elapsed_us: 0,
+        key: "Z".into(),
+        down: true,
+    });
+    assert_object_fields(&raw_recording::Recording {
+        duration_us: 0,
+        events: Vec::new(),
+        repeats: 0,
+        truncated: false,
+    });
     let decl = KeyboardState::decl();
     assert!(
         !decl.contains("snap_tap_saved_modes"),

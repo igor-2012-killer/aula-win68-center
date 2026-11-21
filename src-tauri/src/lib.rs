@@ -4,7 +4,13 @@ mod device;
 mod hid;
 mod keymap;
 mod protocol;
+mod raw_recording;
 mod state;
+
+#[cfg(windows)]
+pub fn run_raw_input_helper() {
+    raw_recording::run_helper();
+}
 
 #[cfg(test)]
 mod agent_rules;
@@ -171,15 +177,6 @@ fn known_key(id: u16) -> Result<(), String> {
     }
 }
 
-/// Lists Mod-Tap assignments known to the cache.
-///
-/// Only keys seen in a refresh or scan appear here; the Mod-Tap tab can sweep
-/// the whole board with `scan_mod_tap`.
-#[tauri::command]
-fn list_mod_tap(device: Dev) -> Vec<ModTapAssignment> {
-    device.state().mod_tap
-}
-
 /// Sweeps keys for Mod-Tap assignments. An empty id list scans all 68 keys.
 #[tauri::command]
 async fn scan_mod_tap(device: Dev<'_>, key_ids: Vec<u16>) -> Result<(), String> {
@@ -247,6 +244,26 @@ async fn set_streaming(device: Dev<'_>, on: bool) -> Result<(), String> {
     run_job(device, move |tx| Job::Streaming(on, tx)).await
 }
 
+#[tauri::command]
+async fn start_key_recording(
+    recorder: State<'_, Arc<raw_recording::Recorder>>,
+) -> Result<(), String> {
+    let recorder = recorder.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || recorder.start())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn stop_key_recording(
+    recorder: State<'_, Arc<raw_recording::Recorder>>,
+) -> Result<raw_recording::Recording, String> {
+    let recorder = recorder.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || recorder.stop())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 async fn apply(device: Dev<'_>, key_ids: Vec<u16>, patch: KeyPatch) -> Result<(), String> {
     let ids: Vec<u16> = key_ids
         .into_iter()
@@ -263,19 +280,15 @@ async fn apply(device: Dev<'_>, key_ids: Vec<u16>, patch: KeyPatch) -> Result<()
     .await
 }
 
-#[tauri::command]
-fn key_name(id: u16) -> String {
-    keymap::key_name(id)
-}
-
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
             let device = Device::new();
             device.attach(handle);
             app.manage(device);
+            app.manage(Arc::new(raw_recording::Recorder::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -289,7 +302,6 @@ pub fn run() {
             reset_keys,
             set_snap_tap,
             clear_snap_tap,
-            list_mod_tap,
             scan_mod_tap,
             set_mod_tap,
             clear_mod_tap,
@@ -298,8 +310,12 @@ pub fn run() {
             set_profile,
             set_os_mode,
             set_streaming,
-            key_name,
-        ])
-        .run(tauri::generate_context!())
-        .expect("failed to start application");
+            start_key_recording,
+            stop_key_recording,
+        ]);
+
+    #[allow(clippy::exit)]
+    // tauri-codegen expands generate_context!() to process::exit(101) if its helper thread panics
+    let context = tauri::generate_context!();
+    builder.run(context).expect("failed to start application");
 }

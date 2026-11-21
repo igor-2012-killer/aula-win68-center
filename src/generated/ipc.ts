@@ -107,6 +107,10 @@ snap_tap: SnapTap | null,
  */
 mod_tap: Array<ModTapAssignment>, keys: { [key in number]?: KeySettings }, layout: Array<KeyDef>, presets: Array<[string, Array<number>]>, };
 
+export type KeyEvent = { elapsed_us: number, key: "Z" | "X", down: boolean, };
+
+export type Recording = { duration_us: number, events: Array<KeyEvent>, repeats: number, truncated: boolean, };
+
 export interface IpcCommands {
   get_state: {
     args: undefined;
@@ -166,10 +170,6 @@ export interface IpcCommands {
     args: undefined;
     result: null;
   };
-  list_mod_tap: {
-    args: undefined;
-    result: Array<ModTapAssignment>;
-  };
   scan_mod_tap: {
     args: {
       keyIds: Array<number>;
@@ -218,11 +218,13 @@ export interface IpcCommands {
     };
     result: null;
   };
-  key_name: {
-    args: {
-      id: number;
-    };
-    result: string;
+  start_key_recording: {
+    args: undefined;
+    result: null;
+  };
+  stop_key_recording: {
+    args: undefined;
+    result: Recording;
   };
 }
 

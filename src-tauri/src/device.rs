@@ -631,7 +631,7 @@ impl Worker {
         loop {
             let now = Instant::now();
             let mut deadline = next_watchdog;
-            if self.stream_flag.load(Ordering::Relaxed) {
+            if self.stream_flag.load(Ordering::Relaxed) && link.is_open() {
                 deadline = deadline.min(next_stream);
             }
 
@@ -653,7 +653,10 @@ impl Worker {
                     self.publish();
                 }
             }
-            if self.stream_flag.load(Ordering::Relaxed) && Instant::now() >= next_stream {
+            if self.stream_flag.load(Ordering::Relaxed)
+                && link.is_open()
+                && Instant::now() >= next_stream
+            {
                 next_stream = Instant::now() + STREAM_INTERVAL;
                 self.sample_sensors(&mut link);
             }
@@ -697,6 +700,12 @@ impl Worker {
             if let Ok(mut slot) = self.app.write() {
                 *slot = Some(app.clone());
             }
+        }
+
+        if let Job::Streaming(false, reply) = job {
+            self.stop_streaming();
+            let _ = reply.send(Ok(()));
+            return true;
         }
 
         if !link.is_open() && !link.open(api) {
@@ -873,7 +882,17 @@ impl Worker {
         self.emit_status("connected", None);
     }
 
+    fn stop_streaming(&self) {
+        if self.stream_flag.swap(false, Ordering::Relaxed) {
+            if let Some(app) = self.app() {
+                let zeros = vec![0u16; SENSOR_COUNT];
+                ipc_emit_travel(&app, &zeros);
+            }
+        }
+    }
+
     fn mark_disconnected(&self, reason: &str) {
+        self.stop_streaming();
         let changed = self.state().connected || self.state().reconnecting;
         if let Ok(mut state) = self.state.write() {
             state.connected = false;
@@ -886,6 +905,7 @@ impl Worker {
     }
 
     fn mark_reconnecting(&self) {
+        self.stop_streaming();
         if let Ok(mut state) = self.state.write() {
             state.connected = false;
             state.reconnecting = true;

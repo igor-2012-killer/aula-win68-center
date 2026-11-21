@@ -27,6 +27,9 @@ tauri-plugin-log = "2"
 hidapi = "2.6"
 ts-rs = "10.1.0"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Input", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+
 [profile.release]
 codegen-units = 1
 lto = true
