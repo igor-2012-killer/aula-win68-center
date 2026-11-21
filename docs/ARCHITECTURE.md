@@ -119,29 +119,53 @@ also disappears from enumeration for about a second.
 The 6x21 travel matrix needs two round-trips per frame (half 1 and half 2) and
 returns 192 bytes each, so it is polled on the I/O thread at ~60 Hz and pushed
 to the webview as an event rather than pulled from JavaScript. Latency therefore
-does not depend on the render loop, and the stream only runs while the sensor
-tab is open.
+does not depend on the render loop. The deck control «Key travel» and the
+Sensors tab share one switch, so the stream keeps running after leaving that
+tab until it is turned off, the keyboard disconnects/re-enumerates, or a
+recording stops it. On the frontend, `kb://travel` frames are published through
+a dedicated `TravelBus` (`store.ts` / `useTravel`) instead of root React state,
+so only the keyboard diagram, the small live deck readout, and an active Sensors
+tab re-render at 60 Hz.
+Game recording defaults to stopping the sensor stream first; it can still collect
+Raw Input and tosu data without sensor polling. Travel sampling is opt-in for a
+recording. Stopping is serialized with stream starts and must succeed before the
+default recording begins.
 
 ---
 
 ## Frontend
 
-Preact with hooks, no state-management library. The bundle is ~43 kB of
-JavaScript (16 kB gzipped) and 20 kB of CSS.
+Preact with hooks, no state-management library. The bundle is ~162 kB of
+JavaScript (53 kB gzipped) and 26 kB of CSS (6 kB gzipped).
 
 ```
 src/
-├── main.tsx      mount
-├── app.tsx       shell: title bar, tabs, keyboard deck
-├── store.ts      state, toasts, key selection, event wiring
-├── ipc.ts        typed invoke wrappers + event subscriptions
-├── types.ts      UI constants; IPC types re-exported from generated/ipc.ts
-├── generated/ipc.ts  generated from the Rust IPC surface
-├── i18n.ts       RU / EN strings
+├── main.tsx              mount
+├── app.tsx               shell: title bar, side navigation, keyboard deck
+├── use-sensor-stream.ts  one travel stream for the deck and Sensors
+├── sensor-stream.ts      serialized stream toggle controller
+├── store.ts              state, TravelBus, toasts, key selection, event wiring
+├── ipc.ts                typed invoke wrappers + event subscriptions
+├── types.ts              UI constants; IPC types re-exported from generated/ipc.ts
+├── generated/ipc.ts      generated from the Rust IPC surface
+├── i18n.ts               RU / EN strings
+├── tosu-data.ts          tosu v2 snapshot parser
+├── tosu-precise.ts       tosu precise K1/K2 collector & summary
+├── capture-analysis.ts   tosu recording summary
+├── recording-graph.ts    travel gap splitting & display downsampling
+├── session-export.ts     JSON session serializer
+├── session-review.ts     session decoder & comparison checks
+├── tuning.ts             Rapid Trigger tuning eligibility & snapshot checks
 └── components/
-    ├── Keyboard.tsx   interactive 68-key diagram
-    ├── ui.tsx         Slider, Toggle, Segmented, Select, Button, Panel
-    └── tabs/
+    ├── Keyboard.tsx      interactive 68-key diagram with drag-select & live travel
+    ├── ui.tsx            Slider, Toggle, Segmented, Select, Button, Panel
+    ├── TosuPanel.tsx     optional local tosu v2 status & live stats
+    ├── GameRecording.tsx opt-in Z/X + tosu + sensor session recorder
+    ├── KeyEventTimeline.tsx Raw Input event timeline viewer
+    ├── SessionComparison.tsx baseline vs current/loaded JSON comparator
+    ├── TuningWizard.tsx  3+3 Rapid Trigger comparison guide
+    ├── PracticeExercise.tsx 10-second Z/X practice counter
+    └── tabs/             Actuation, Rapid, SnapTap, ModTap, Lighting, Sensors, System
 ```
 
 `src/generated/ipc.ts` is generated from the Rust command signatures, event
@@ -162,7 +186,8 @@ slider across the track issues one HID write, not two hundred.
 | `keymap.rs` | the 68-key physical layout | serde only |
 | `state.rs` | the serialisable model | `protocol`, `keymap` |
 | `device.rs` | the I/O actor, refresh, writes, streaming | all of the above + tauri |
-| `lib.rs` | command surface and input validation | `device`, `state` |
+| `raw_recording.rs` | isolated Windows Raw Input Z/X recorder helper | `windows-sys`, `serde` |
+| `lib.rs` | command surface and input validation | `device`, `state`, `raw_recording` |
 
 `protocol.rs`, `hid.rs` and `keymap.rs` are free of Tauri and logging, which is
 what lets `tools/probe` include them by source path and stay a sub-second build

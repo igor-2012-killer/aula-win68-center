@@ -38,12 +38,42 @@ matrix including what does **not** work.
 | **Snap Tap** | Bind two keys and pick the resolver: last-pressed-wins, first-key, second-key, or neutral. Semantics captured from the vendor's own driver, behaviour confirmed on the board. |
 | **Mod-Tap** | A hold output and a tap output on any key, hold threshold in 10 ms steps, whole-board scan for existing assignments. |
 | **Lighting** | 21 effects, brightness, speed, direction, sleep timer, Super Response, and a 7-colour palette with quick swatches and a full colour picker. |
-| **Sensors** | Live Hall-sensor stream: 68 gauges showing real-time stem travel with peak hold. |
+| **Sensors** | **Monitor** and **Recording & osu!** sub-tabs: 68 real-time Hall-sensor gauges with peak hold, keystroke practice, opt-in Windows Raw Input recording, and optional tosu integration. |
 | **System** | Polling rate 500–8000 Hz with the latency for each step, 4 on-keyboard profiles, Windows/macOS layout switching, full device readout, and configuration export/import to a file. |
 
-Key selection is shared across every tab: click a key to select it,
+In **Sensors → Recording & osu!**, opt-in Z/X practice recordings on Windows can
+include observed osu! statistics from a separately running
+[tosu](https://github.com/tosuapp/tosu) instance. Recording stops sensor polling by default;
+travel graphs are optional. This reduces application work, but the effect on
+game performance depends on the computer. In **Compare attempts**, pin the current
+recording as a baseline before recording another, or load a previously exported
+JSON. The baseline summary and current recording stay in memory when changing
+tabs, until the app closes; export JSON before the next recording to keep the
+complete baseline. Key travel on the keyboard diagram and the Sensors tab share
+one stream switch; leaving the tab does not stop it, while disconnecting or
+re-enumerating stops the backend stream, and an active tosu connection remains
+open. The view checks available
+map and mod identifiers and shows median key-hold durations and last observed
+game statistics. These observations include time outside gameplay, may have
+missing samples and are not automatically attributed to a key or setting.
+During recording, the optional tosu K1/K2 stream stores sampled game-side
+counters next to Windows Z/X events. Different devices, mappings, timing and
+counter resets can cause differences; this does not identify a lost press.
+
+The Rapid Trigger tuning guide collects three attempts for each of two settings
+on Z or X, with comfort and self-reported symptoms. It checks available Z/X
+settings, map, mods and passage timing; matching those does not prove identical
+gameplay. Summaries and ratings are stored locally between app launches; full
+recordings require a separate JSON export. The guide never writes keyboard
+settings or determines an optimal value.
+The guide can reload a saved JSON recording that contains detailed settings.
+
+Key selection is shared across every key-oriented tab (Actuation, Rapid Trigger,
+Snap Tap, Mod-Tap, Sensors): click or drag across keys to select them,
 `Ctrl`/`Shift`+click to add to the selection, and the chips give you WASD, QWER,
-arrows, digits, letters, modifiers or everything. Interface is RU/EN.
+arrows, digits, letters, modifiers or everything (or quick pairs on Snap Tap).
+The diagram marks Snap Tap (`ST`) and Mod-Tap (`MT`) assignments and hides on
+Lighting and System. Interface is RU/EN.
 
 ## Status of the features people expect
 
@@ -178,8 +208,10 @@ immediately whether you have something we need.**
 ├── index.html
 ├── vite.config.ts
 ├── src/                     Preact front end
-│   ├── app.tsx              shell: title bar, tabs, keyboard deck
-│   ├── store.ts             state, toasts, key selection
+│   ├── app.tsx              shell: title bar, side navigation, keyboard deck
+│   ├── store.ts             state, travel bus, toasts, key selection, event wiring
+│   ├── use-sensor-stream.ts shared live sensor stream hook
+│   ├── sensor-stream.ts     serialized stream toggle controller
 │   ├── ipc.ts               typed invoke wrappers + event subscriptions
 │   ├── types.ts             UI constants; IPC types from generated/ipc.ts
 │   ├── generated/ipc.ts     generated from the Rust IPC surface
@@ -196,7 +228,9 @@ immediately whether you have something we need.**
 │       ├── keymap.rs        the 68-key physical layout         (no Tauri)
 │       ├── state.rs         the serialisable model
 │       ├── device.rs        I/O thread, refresh, writes, streaming
+│       ├── raw_recording.rs Windows Raw Input Z/X recorder helper
 │       └── lib.rs           command surface and input validation
+├── tests/                   JS unit tests (`npm test`)
 ├── tools/probe/             standalone protocol research CLI
 └── docs/
     ├── PROTOCOL.md          the wire protocol, byte offsets, verified captures
@@ -227,6 +261,7 @@ The three modules marked *no Tauri* are included by source path in
 ```sh
 # protocol parsing, key map, mode round-trip — no hardware needed
 cargo test --manifest-path src-tauri/Cargo.toml --lib
+npm test                      # pure TS/JS unit tests
 npm run build                 # tsc --noEmit + vite build
 
 # transport and write tests against a real keyboard

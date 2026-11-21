@@ -34,9 +34,10 @@ arbiter.
 | Config export/import, disconnect handling | added |
 | CI | 5/5 jobs green |
 
-Local gates, all currently passing: 38 unit tests (11 hardware tests are
-`#[ignore]`d), clippy clean under `-D warnings` for both the app and the probe,
-`cargo fmt --check` clean, `npm run build` clean, markdown link check clean.
+Local gates, all currently passing: 58 Rust unit tests (12 hardware tests are
+`#[ignore]`d), 28 JS unit tests (`npm test`), clippy clean under `-D warnings`
+for both the app and the probe, `cargo fmt --check` clean, `npm run build` clean,
+markdown link check clean, and `tools/check-repo-rules.sh` clean.
 
 ## The one thing to understand about this project
 
@@ -93,12 +94,15 @@ experimentation since the last snapshot. Do not revert it without asking.
 
 ```
 src-tauri/src/
-  hid.rs        151  raw HID handle, I/O thread
-  protocol.rs   939  framing, checksums, every command, unit tests
-  keymap.rs     180  68-key layout
-  state.rs      251  decoded device state
-  device.rs   1835  high-level ops, hardware tests
-  lib.rs        226  Tauri commands, write gates
+  hid.rs          raw HID handle, I/O thread
+  protocol.rs     framing, checksums, every command, unit tests
+  keymap.rs       68-key layout
+  state.rs        decoded device state
+  device.rs       high-level ops, hardware tests
+  raw_recording.rs Windows Raw Input Z/X recorder helper
+  ipc_bindings.rs  tests & regenerates src/generated/ipc.ts
+  agent_rules.rs   tests enforcing AGENTS.md architecture/safety rules
+  lib.rs          Tauri commands, write gates
 src/                  Preact UI
 tools/probe/          standalone CLI, shares protocol.rs by source path
 tools/hid-capture/    WebHID frame logger, init script
@@ -167,10 +171,10 @@ cargo clippy --manifest-path tools/probe/Cargo.toml --all-targets -- -D warnings
 .\tools\probe\target\release\aula-probe.exe state
 ```
 
-CI (`.github/workflows/ci.yml`) runs five jobs: frontend typecheck and build,
-backend test plus clippy plus fmt, standalone probe build, Windows release build,
-and a markdown link check. The docs job also runs `tools/check-repo-rules.sh`.
-All five were red at `53975a7` for environmental
+CI (`.github/workflows/ci.yml`) runs five jobs: frontend (tests + typecheck + build),
+backend test plus clippy plus fmt, standalone probe build + test + clippy + fmt,
+Windows release build, and a markdown link check. The docs job also runs
+`tools/check-repo-rules.sh`. All five were red at `53975a7` for environmental
 reasons rather than code defects; `0e6c856` fixed them. The two worth knowing
 about:
 

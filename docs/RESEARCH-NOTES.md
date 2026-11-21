@@ -18,6 +18,85 @@ JavaScript.
 
 ---
 
+## Practice recording, Raw Input, and tosu observations
+
+The sensor practice view provides a read-only way to compare selected keys'
+travel and observed peaks while playing. It is not a hardware calibration or
+an automatic recommendation, and the stream can miss very short peaks.
+It offers a Z/X selection shortcut and links to existing per-key controls;
+those controls still perform their usual writes and change the key's mode.
+Timed practice counts key events received by the focused application and
+compares two completed attempts per exercise within the window session. It
+does not detect missed physical presses or distinguish input devices. Its
+sampled release position can miss the true minimum and is not a latency test.
+The in-game recording defaults to no sensor polling; it captures Z/X Raw Input
+and tosu without a travel chart, and stops any active sensor stream before
+starting. Sensor recording is optional. When enabled it subscribes directly to
+travel events while the Sensors tab remains open, and reports callback gaps. Background
+delivery and the roughly 60 Hz source can miss movement; failed half-matrix
+reads may appear as zeroes. The graph does not establish game hit or miss events.
+Sensor graph segments split at callback gaps above 250 ms before display
+reduction, retaining bucket extrema and segment boundaries. This threshold is
+only a visual indicator; shorter gaps and failed reads can still lose data.
+An opt-in Windows Raw Input session records only Z/X make/break codes from
+the uniquely matched WIN68 MI_00 input collection during recording. It is a
+separate system input path, not a second reader of the vendor HID interface.
+Events are timestamped when processed, not at the keyboard; sensor frames and
+osu! judgements are not synchronized with these timestamps. Recording stops
+after three minutes or 50,000 events, and no other keys are stored.
+Key remapping may make these codes differ from the physical switches pressed.
+The optional tosu precise stream records K1/K2 snapshots during an active
+session, storing only changed values and endpoints alongside update counts,
+invalid messages, gaps, connection state and truncation. The displayed totals
+sum observed positive counter deltas; resets are counted separately, and events
+around resets or outside the observed interval are unknown. K1/K2 can include
+other bindings/devices and do not establish a mapping to this board's Z/X.
+Snapshots and Raw Input have independent delivery delays and boundaries; a
+numerical discrepancy is not proof of missing input or a particular miss.
+The user can turn this additional stream off if it affects game performance.
+The optional tosu panel connects locally to its v2 WebSocket on port 24050 and
+shows aggregate game data. It does not synchronize game judgements with Raw
+Input events and does not infer which key caused a hit or miss.
+It retains the last received playing-state snapshot with at least one judgement
+across menu resets, connection loss and tab changes, until the app is closed. This is neither
+necessarily a final result nor necessarily the current keyboard recording. On a
+local stable session tosu reported a result-screen memory-read error, so an
+empty or failed result screen must not be interpreted as a zero-miss result.
+While recording, accepted tosu snapshots are stored with Z/X events and sensor
+samples and may be exported locally as JSON. The keyboard startup interval is
+bracketed by browser-side IPC request/response timestamps. This does not measure
+clock drift, Windows event delivery latency, tosu sampling or game latency, and
+cannot establish per-note judgement attribution. No tosu data before the start
+response or after the stop request is captured in the session.
+The comparison view can load a previous local session and compare it with the
+latest one, or pin the current summary as a baseline in memory. The latest
+recording and baseline survive tab changes, but not closing the app; the complete
+baseline must be exported before starting another recording. Key travel on the
+keyboard diagram and the Sensors tab share one sensor stream switch; leaving
+Sensors does not stop it, while disconnecting or re-enumerating stops the
+backend stream, and tosu remains connected until disconnected or closed.
+Hold duration is a median of complete OS-observed make/break pairs
+across the entire recording, including menus. Game values are last observed
+tosu snapshots, not necessarily final scores. Map checksum, mode, mods checksum,
+speed and client type must all be known and match before they are labelled as
+matching; even then this does not establish causality or identical gameplay.
+The tuning guide requires a single uninterrupted observed play period with at
+least 10 seconds of map time, matching tosu identity and passage endpoints within
+three seconds of the first attempt. It requires three recordings per setting,
+with only the selected Z/X Rapid Trigger field different in the captured
+settings. This is an eligibility rule, not a guarantee of equal passages or
+independent trials. Ratings and summaries are stored locally; raw sessions are
+only saved when exported. Nothing is applied to the keyboard automatically.
+In a captured stable play, tosu emitted a stale 38.169 s time for one initial
+`play` frame, then reset to 0 before any judged notes. Such pre-judgement time
+resets restart the observed passage window and are not counted as restarts.
+Rewinds after judged notes remain flagged. This rule cannot prove whether an
+unjudged restart occurred; it only avoids rejecting that observed startup pattern.
+The tuning guide can load a saved full JSON containing a recording ID and
+structured settings, so an earlier attempt can be recovered after app reload.
+
+---
+
 ## Confirmed working
 
 Verified by write → read-back on real hardware, and pinned by the tests in

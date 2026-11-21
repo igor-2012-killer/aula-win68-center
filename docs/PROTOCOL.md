@@ -354,3 +354,61 @@ cargo run --manifest-path tools/probe/Cargo.toml --release -- \
 
 Add every new finding to [RESEARCH-NOTES.md](RESEARCH-NOTES.md), including the
 negative results — those are the ones that save the next person a week.
+
+---
+
+## 8. Practice, Raw Input, and tosu integration
+
+The sensor practice view uses the existing realtime travel stream (command 18)
+to show selected keys and their observed session peaks. It does not calibrate
+the sensors or write keyboard settings; samples are not a guarantee that every
+short peak was captured.
+The timed Z/X exercises count OS keyboard events while the app has focus;
+they are not device-specific or an osu! accuracy measurement. Release
+positions are approximate sampled minima, not synchronized HID key events.
+Game recording subscribes to existing travel events independently of the UI
+render loop. It records event arrival times, not hardware timestamps. Missing
+half-matrix reads currently produce zeroes, which are indistinguishable from
+real zero travel; the recording must not be treated as a lossless measurement.
+The sensor chart marks callback gaps over 250 ms and never draws across them.
+The threshold is a display rule, not a guarantee that shorter gaps contain no
+lost frames. Raw keyboard event timelines have a separate time origin and must
+not be overlaid on sensor samples as if they were synchronized.
+The default game recording disables the optional sensor stream before starting
+and records only Z/X Raw Input and tosu snapshots. Sensor recording can be
+explicitly selected; the session's sensor `enabled` field indicates whether
+travel was requested. Disabling the stream does not change keyboard settings.
+An explicitly started Windows Raw Input session separately captures only Z/X
+make/break events from the uniquely matched WIN68 MI_00 keyboard collection.
+It does not open a second vendor HID handle or change keyboard configuration.
+Event times are recorded when the app processes Windows messages, and are not
+synchronized to sensor frames or osu! hit judgements.
+The optional local tosu connection is separate from the keyboard protocol and
+exposes aggregate game state; it does not associate judgements with key events.
+When enabled, an additional tosu `/websocket/v2/precise` connection is open
+only while recording. It stores sampled K1/K2 counter and pressed-state changes,
+endpoints, gaps and reset diagnostics in the optional session `precise` field.
+These are sampled game-side values, not individual hardware events. K1/K2 are
+not automatically mapped to a particular device or Z/X, and the observation
+windows and latencies differ from Raw Input; differences do not prove lost input.
+An optional session export contains only selected tosu snapshots received during
+the recording, sensor frames, Z/X events and clock-boundary diagnostics. It does
+not establish exact synchronization between any of those independent sources.
+The local session comparison reads exported JSON without hardware writes. Key
+hold summaries use complete Raw Input event pairs and include time outside play;
+game values remain last observed tosu aggregates, not necessarily final scores.
+The user can pin the current summary as a baseline without a file; that summary
+and the latest session remain in memory across tab changes until the app closes.
+Export the full session before recording again to preserve it. Key travel on
+the keyboard diagram and the Sensors tab share one stream switch; leaving
+Sensors does not stop it, while disconnecting or re-enumerating stops the
+backend stream, and the optional tosu connection stays open. The Z/X tuning
+shortcuts only select a key and navigate; they do not write to the keyboard.
+The Rapid Trigger guide stores only local attempt summaries and self-reported
+ratings, and checks captured Z/X settings and tosu map identity and passage
+times before comparing three attempts per setting. It has no hardware write
+path. Exported sessions now optionally include a structured settings snapshot;
+older exports remain readable but cannot verify the guide's settings checks.
+The guide can also reload compatible exported sessions. A tosu time reset before
+any judged notes restarts the observed passage window; a rewind after judgements
+is still reported. This does not prove whether a restart happened before notes.
